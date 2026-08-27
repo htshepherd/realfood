@@ -21,6 +21,7 @@ COPY --from=builder --chown=nextjs:nodejs /workspace/prototype-mobile/.next/stat
 COPY --from=builder --chown=nextjs:nodejs /workspace/prototype-mobile/public ./public
 COPY --from=builder --chown=nextjs:nodejs /workspace/prototype-mobile/server-assets ./server-assets
 COPY --from=builder --chown=nextjs:nodejs /workspace/prototype-mobile/scripts ./scripts
+COPY --from=builder --chown=nextjs:nodejs /workspace/prototype-mobile/src/server ./src/server
 COPY --from=builder --chown=nextjs:nodejs /workspace/prototype-mobile/db ./db
 USER nextjs
 WORKDIR /app
