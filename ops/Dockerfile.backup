@@ -1,0 +1,8 @@
+FROM postgres:16-alpine
+ARG TARGETARCH
+RUN apk add --no-cache restic curl && \
+    curl -fsSL "https://dl.min.io/client/mc/release/linux-${TARGETARCH}/mc" -o /usr/local/bin/mc && \
+    chmod +x /usr/local/bin/mc
+COPY backup.sh restore.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/backup.sh /usr/local/bin/restore.sh
+ENTRYPOINT ["/usr/local/bin/backup.sh"]

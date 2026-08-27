@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+knowledge/
+raw/
+node_modules/
+.next/
+prototype-mobile/.generated/
+prototype-mobile/src/data/release.json
+prototype-mobile/server-assets/
+prototype-mobile/server-assets/*/optimized/
+prototype-mobile/server-assets/releases/
+prototype-mobile/test-results/
+prototype-mobile/playwright-report/
+prototype-mobile/.auth/
