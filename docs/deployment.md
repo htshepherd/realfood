@@ -7,6 +7,8 @@
 3. 首次配置固定家庭账号：临时设置 `SEED_ACCOUNTS_JSON`，运行 `docker compose run --rm app node scripts/seed-accounts.mjs`，完成后立即删除该变量。
 4. Compose 的 `assets` 一次性服务会在应用启动前上传原图与无损 WebP；需要单独重传时运行 `docker compose run --rm assets`。MinIO 桶始终保持私有。
 5. 每次知识更新先执行 `pnpm knowledge:build` 检查候选版本；确认报告后执行 `pnpm knowledge:publish`，再构建并部署同一版本镜像。Compose 会在应用启动前把原图与同像素无损 WebP 上传到私有 MinIO。
+
+中国大陆服务器无法稳定访问官方镜像源时，只在服务器 `.env` 中设置 `NODE_IMAGE`、`POSTGRES_IMAGE`、`MINIO_IMAGE`、`MINIO_MC_IMAGE` 和 `CADDY_IMAGE`。不要直接替换 `compose.yaml` 或 Dockerfile 中的镜像地址，否则后续更新会产生工作区冲突。示例值见 `.env.example`。
 6. `public/` 只放 PWA 图标和 Service Worker；知识 JSON、Pagefind 与业务图片位于服务端目录或私有 MinIO，必须通过登录后的 `/api/v1` 读取。
 
 固定账号通过 `SEED_ACCOUNTS_JSON` 配置；停用、启用或轮换密码使用 `pnpm db:account -- disable <账号>`、`enable <账号>`、`rotate <账号>`。轮换时只通过环境变量 `ACCOUNT_PASSWORD` 传入新密码，旧可信设备会在下次联网检查时失效。

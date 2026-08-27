@@ -1,10 +1,11 @@
-FROM node:24-alpine AS dependencies
+ARG NODE_IMAGE=node:24-alpine
+FROM ${NODE_IMAGE} AS dependencies
 RUN corepack enable
 WORKDIR /workspace/prototype-mobile
 COPY prototype-mobile/package.json prototype-mobile/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-FROM node:24-alpine AS builder
+FROM ${NODE_IMAGE} AS builder
 RUN corepack enable
 WORKDIR /workspace
 COPY --from=dependencies /workspace/prototype-mobile/node_modules ./prototype-mobile/node_modules
@@ -12,7 +13,7 @@ COPY prototype-mobile ./prototype-mobile
 WORKDIR /workspace/prototype-mobile
 RUN pnpm build
 
-FROM node:24-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
