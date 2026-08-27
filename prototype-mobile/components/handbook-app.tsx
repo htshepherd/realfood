@@ -319,10 +319,10 @@ function CategoryPicker({ label, categories, active, setActive, allowAll = true,
     <button aria-label={title} aria-expanded={open} onClick={() => setOpen(true)} className="focus-ring inline-flex max-w-full items-center gap-1.5 rounded-lg px-2 py-2 text-[15px] font-semibold">
       <span className="truncate">{activeLabel}</span><ChevronDown size={16} className={`shrink-0 text-[var(--muted)] transition-transform ${open ? "rotate-180" : ""}`}/>
     </button>
-    <DialogContent aria-describedby={undefined} className="mx-auto max-h-[76dvh] max-w-[520px] rounded-t-[28px] border-x-0 border-b-0 px-0 pb-[max(18px,env(safe-area-inset-bottom))] sm:inset-x-0 sm:bottom-0 sm:top-auto sm:max-h-[76dvh] sm:w-full sm:rounded-t-[28px] sm:rounded-b-none">
-      <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-[var(--line-strong)]"/>
-      <div className="px-6 pb-4 pt-5"><DialogTitle className="text-[20px] font-semibold tracking-[-0.025em]">{title}</DialogTitle><p className="mt-1 text-[13px] text-[var(--muted)]">{allowAll ? `当前共 ${total} 项` : `共 ${categories.length} 个主题`}</p></div>
-      <div className="no-scrollbar overflow-y-auto px-3 pb-3">
+    <DialogContent aria-describedby={undefined} className="mx-auto flex max-h-[76dvh] max-w-[520px] flex-col rounded-t-[28px] border-x-0 border-b-0 px-0 pb-[max(18px,env(safe-area-inset-bottom))] sm:inset-x-0 sm:bottom-0 sm:top-auto sm:max-h-[76dvh] sm:w-full sm:rounded-t-[28px] sm:rounded-b-none">
+      <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-[var(--line-strong)]"/>
+      <div className="shrink-0 px-6 pb-4 pt-5"><DialogTitle className="text-[20px] font-semibold tracking-[-0.025em]">{title}</DialogTitle><p className="mt-1 text-[13px] text-[var(--muted)]">{allowAll ? `当前共 ${total} 项` : `共 ${categories.length} 个主题`}</p></div>
+      <div data-category-options className="no-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto px-3 pb-3">
         {options.map((option) => {
           const selected = active === option.name;
           return <button data-category-option key={option.name} onClick={() => { setActive(option.name); setOpen(false); }} className={`focus-ring flex min-h-14 w-full items-center rounded-[16px] px-4 text-left ${selected ? "bg-[#edf2ee]" : "bg-white"}`}>
@@ -581,10 +581,14 @@ function DosageGroup({ group }: { group: SlotGroup }) {
   if (headerIndex < 0) return <div className="ml-5"><MarkdownBody markdown={visibleMarkdown(group.markdown)}/></div>;
   const cells = (line: string) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
   const headers = cells(lines[headerIndex]);
-  const rows = lines.slice(headerIndex + 2).filter((line) => line.trim().startsWith("|")).map(cells);
+  const firstRowIndex = headerIndex + 2;
+  let tableEndIndex = firstRowIndex;
+  while (tableEndIndex < lines.length && lines[tableEndIndex].trim().startsWith("|")) tableEndIndex += 1;
+  const rows = lines.slice(firstRowIndex, tableEndIndex).map(cells);
   const preamble = visibleMarkdown(lines.slice(0, headerIndex).join("\n"));
-  if (headers.length > 2) return <>{preamble && <div className="mb-4 ml-5"><MarkdownBody markdown={preamble}/></div>}<div data-reference-table className="overflow-x-auto border-y border-[var(--line-strong)]"><table className="w-full min-w-[440px] border-collapse"><thead><tr>{headers.map((header) => <th key={header} className="border-b border-[var(--line)] px-3 py-3 text-left text-[12px] font-medium text-[var(--muted)] first:pl-0 last:pr-0">{header}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={`${row[0]}-${index}`} className="border-b border-[var(--line)] last:border-0">{row.map((cell, cellIndex) => <td key={`${cell}-${cellIndex}`} className={`px-3 py-4 text-[14px] first:pl-0 last:pr-0 ${cellIndex === 0 ? "text-[var(--muted)]" : "font-semibold text-[var(--text)]"}`}>{cell}</td>)}</tr>)}</tbody></table></div></>;
-  return <>{preamble && <div className="mb-4 ml-5"><MarkdownBody markdown={preamble}/></div>}<div data-reference-table className="border-y border-[var(--line-strong)]"><div className="grid grid-cols-[1fr_auto] gap-5 border-b border-[var(--line)] py-3 text-[12px] font-medium text-[var(--muted)]"><span>{headers[0]}</span><span>{headers[1]}</span></div><dl>{rows.map((row, index) => <div key={`${row[0]}-${index}`} className="grid min-h-[64px] grid-cols-[1fr_auto] items-center gap-5 border-b border-[var(--line)] py-3.5 last:border-0"><dt className="text-[14px] leading-6 text-[var(--muted)]">{row[0]}</dt><dd className="text-right text-[15px] font-semibold text-[var(--text)]">{row[1]}</dd></div>)}</dl></div></>;
+  const trailing = visibleMarkdown(lines.slice(tableEndIndex).join("\n"));
+  if (headers.length > 2) return <>{preamble && <div className="mb-4 ml-5"><MarkdownBody markdown={preamble}/></div>}<div data-reference-table className="overflow-x-auto border-y border-[var(--line-strong)]"><table className="w-full min-w-[440px] border-collapse"><thead><tr>{headers.map((header) => <th key={header} className="border-b border-[var(--line)] px-3 py-3 text-left text-[12px] font-medium text-[var(--muted)] first:pl-0 last:pr-0">{header}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={`${row[0]}-${index}`} className="border-b border-[var(--line)] last:border-0">{row.map((cell, cellIndex) => <td key={`${cell}-${cellIndex}`} className={`px-3 py-4 text-[14px] first:pl-0 last:pr-0 ${cellIndex === 0 ? "text-[var(--muted)]" : "font-semibold text-[var(--text)]"}`}>{cell}</td>)}</tr>)}</tbody></table></div>{trailing && <div className="ml-5"><MarkdownBody markdown={trailing}/></div>}</>;
+  return <>{preamble && <div className="mb-4 ml-5"><MarkdownBody markdown={preamble}/></div>}<div data-reference-table className="border-y border-[var(--line-strong)]"><div className="grid grid-cols-[1fr_auto] gap-5 border-b border-[var(--line)] py-3 text-[12px] font-medium text-[var(--muted)]"><span>{headers[0]}</span><span>{headers[1]}</span></div><dl>{rows.map((row, index) => <div key={`${row[0]}-${index}`} className="grid min-h-[64px] grid-cols-[1fr_auto] items-center gap-5 border-b border-[var(--line)] py-3.5 last:border-0"><dt className="text-[14px] leading-6 text-[var(--muted)]">{row[0]}</dt><dd className="text-right text-[15px] font-semibold text-[var(--text)]">{row[1]}</dd></div>)}</dl></div>{trailing && <div className="ml-5"><MarkdownBody markdown={trailing}/></div>}</>;
 }
 
 function MarkdownBody({ markdown, compact = false }: { markdown: string; compact?: boolean }) {

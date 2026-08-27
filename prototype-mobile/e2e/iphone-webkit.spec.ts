@@ -89,6 +89,27 @@ test("维生素 D 保留完整的获取与利用内容", async ({ page }) => {
   }
 });
 
+test("探索主题选择器可滚动到最后一个分类", async ({ page }) => {
+  await login(page);
+  await navigate(page, "探索");
+  await page.getByRole("button", { name: "选择探索主题" }).click();
+  const dialog = page.getByRole("dialog");
+  const options = dialog.locator("[data-category-options]");
+  const lastOption = dialog.locator("[data-category-option]").last();
+  await expect(lastOption).toBeAttached();
+  await lastOption.scrollIntoViewIfNeeded();
+  const layout = await options.evaluate((container) => {
+    const last = container.querySelector<HTMLElement>("[data-category-option]:last-child");
+    const containerRect = container.getBoundingClientRect();
+    const lastRect = last?.getBoundingClientRect();
+    return {
+      scrollable: container.scrollHeight > container.clientHeight,
+      lastInsideViewport: Boolean(lastRect && lastRect.bottom <= containerRect.bottom + 1),
+    };
+  });
+  expect(layout).toEqual({ scrollable: true, lastInsideViewport: true });
+});
+
 test("三类列表、单标签探索和账号收藏可操作", async ({ page }) => {
   await login(page);
   await navigate(page, "食物");
@@ -143,6 +164,8 @@ test("三类列表、单标签探索和账号收藏可操作", async ({ page }) 
   await page.getByRole("button", { name: /补充方式与用量/ }).click();
   await expect(page.getByRole("heading", { name: "每日参考摄入量", exact: true })).toBeVisible();
   await expect(page.locator("[data-reference-table]")).toBeVisible();
+  await expect(page.getByText(/维生素 A 的可耐受上限为每日 3000 微克 RAE/)).toBeVisible();
+  await expect(page.getByText(/β-胡萝卜素补充剂与吸烟者患肺癌风险增加/)).toBeVisible();
   await expect(page.getByText(/暂分为两类|原始标题/)).toHaveCount(0);
   await page.getByRole("button", { name: "返回" }).click();
   await page.getByRole("button", { name: "返回" }).click();
@@ -177,9 +200,23 @@ test("三类列表、单标签探索和账号收藏可操作", async ({ page }) 
   const exploreTopic = page.getByRole("button", { name: "选择探索主题" });
   await expect(exploreTopic).toBeVisible();
   await exploreTopic.click();
-  await expect(page.getByRole("dialog").getByText("选择探索主题", { exact: true })).toBeVisible();
-  await expect(page.getByRole("dialog").locator("[data-category-option]")).not.toHaveCount(0);
-  await page.getByRole("dialog").locator("[data-category-option]").nth(1).click();
+  const exploreDialog = page.getByRole("dialog");
+  await expect(exploreDialog.getByText("选择探索主题", { exact: true })).toBeVisible();
+  const exploreOptions = exploreDialog.locator("[data-category-options]");
+  const lastExploreOption = exploreDialog.locator("[data-category-option]").last();
+  await expect(lastExploreOption).toBeAttached();
+  await lastExploreOption.scrollIntoViewIfNeeded();
+  const categoryLayout = await exploreOptions.evaluate((container) => {
+    const last = container.querySelector<HTMLElement>("[data-category-option]:last-child");
+    const containerRect = container.getBoundingClientRect();
+    const lastRect = last?.getBoundingClientRect();
+    return {
+      scrollable: container.scrollHeight > container.clientHeight,
+      lastInsideViewport: Boolean(lastRect && lastRect.bottom <= containerRect.bottom + 1),
+    };
+  });
+  expect(categoryLayout).toEqual({ scrollable: true, lastInsideViewport: true });
+  await exploreDialog.locator("[data-category-option]").nth(1).click();
   await expect(page.locator("section .rounded-full").first()).toBeVisible();
   await navigate(page, "验证标志");
   await expect(page.getByText("美国国家卫生基金会", { exact: true })).toBeVisible();

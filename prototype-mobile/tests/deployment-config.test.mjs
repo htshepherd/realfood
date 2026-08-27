@@ -27,6 +27,33 @@ test("应用镜像的三个构建阶段共享可覆盖的 Node 基础镜像", as
   assert.equal(dockerfile.match(/^FROM \$\{NODE_IMAGE\} AS /gm)?.length, 3);
 });
 
+test("生产数据卷名称不再随 Compose 项目名变化", async () => {
+  const compose = await readFile(path.join(projectRoot, "compose.yaml"), "utf8");
+  assert.match(compose, /postgres-data:\n\s+name: \$\{POSTGRES_VOLUME_NAME:-realfood_postgres-data\}/);
+  assert.match(compose, /minio-data:\n\s+name: \$\{MINIO_VOLUME_NAME:-realfood_minio-data\}/);
+  assert.match(compose, /caddy-data:\n\s+name: \$\{CADDY_DATA_VOLUME_NAME:-realfood_caddy-data\}/);
+  assert.match(compose, /caddy-config:\n\s+name: \$\{CADDY_CONFIG_VOLUME_NAME:-realfood_caddy-config\}/);
+});
+
+test("干净检出可通过 BuildKit 命名上下文注入私有运行时包", async () => {
+  const [compose, dockerfile, dockerignore, prepareScript, emptyContextMarker] = await Promise.all([
+    readFile(path.join(projectRoot, "compose.yaml"), "utf8"),
+    readFile(path.join(projectRoot, "prototype-mobile", "Dockerfile"), "utf8"),
+    readFile(path.join(projectRoot, ".dockerignore"), "utf8"),
+    readFile(path.join(projectRoot, "prototype-mobile", "scripts", "prepare-runtime-bundle.mjs"), "utf8"),
+    readFile(path.join(projectRoot, "prototype-mobile", "runtime-empty", ".gitkeep"), "utf8"),
+  ]);
+  assert.match(compose, /additional_contexts:\n\s+runtime_bundle: \$\{RUNTIME_BUNDLE_CONTEXT:-\.\/prototype-mobile\/runtime-empty\}/);
+  assert.match(compose, /RUNTIME_BUNDLE_FILENAME: \$\{RUNTIME_BUNDLE_FILENAME:-runtime\.tar\.gz\}/);
+  assert.match(compose, /RUNTIME_BUNDLE_SHA256: \$\{RUNTIME_BUNDLE_SHA256:-\}/);
+  assert.match(dockerfile, /--mount=type=bind,from=runtime_bundle,source=\.,target=\/run\/runtime-bundle,ro/);
+  assert.match(dockerfile, /node scripts\/prepare-runtime-bundle\.mjs "\/run\/runtime-bundle\/\$\{RUNTIME_BUNDLE_FILENAME\}"/);
+  assert.match(dockerignore, /^private-deploy$/m);
+  assert.match(prepareScript, /prototype-mobile\/src\/data\/release\.json/);
+  assert.match(prepareScript, /prototype-mobile\/server-assets\//);
+  assert.equal(emptyContextMarker, "");
+});
+
 test("生产 runner 包含账号管理脚本依赖的服务端模块", async () => {
   const dockerfile = await readFile(path.join(projectRoot, "prototype-mobile", "Dockerfile"), "utf8");
   assert.match(

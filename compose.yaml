@@ -3,8 +3,12 @@ name: realfood
 x-app-build: &app-build
   context: .
   dockerfile: prototype-mobile/Dockerfile
+  additional_contexts:
+    runtime_bundle: ${RUNTIME_BUNDLE_CONTEXT:-./prototype-mobile/runtime-empty}
   args:
     NODE_IMAGE: ${NODE_IMAGE:-node:24-alpine}
+    RUNTIME_BUNDLE_FILENAME: ${RUNTIME_BUNDLE_FILENAME:-runtime.tar.gz}
+    RUNTIME_BUNDLE_SHA256: ${RUNTIME_BUNDLE_SHA256:-}
 
 services:
   postgres:
@@ -118,6 +122,10 @@ services:
 
 volumes:
   postgres-data:
+    name: ${POSTGRES_VOLUME_NAME:-realfood_postgres-data}
   minio-data:
+    name: ${MINIO_VOLUME_NAME:-realfood_minio-data}
   caddy-data:
+    name: ${CADDY_DATA_VOLUME_NAME:-realfood_caddy-data}
   caddy-config:
+    name: ${CADDY_CONFIG_VOLUME_NAME:-realfood_caddy-config}

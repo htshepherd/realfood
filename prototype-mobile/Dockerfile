@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 ARG NODE_IMAGE=node:24-alpine
 FROM ${NODE_IMAGE} AS dependencies
 RUN corepack enable
@@ -6,12 +8,17 @@ COPY prototype-mobile/package.json prototype-mobile/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 FROM ${NODE_IMAGE} AS builder
+ARG RUNTIME_BUNDLE_FILENAME
+ARG RUNTIME_BUNDLE_SHA256
 RUN corepack enable
 WORKDIR /workspace
 COPY --from=dependencies /workspace/prototype-mobile/node_modules ./prototype-mobile/node_modules
 COPY prototype-mobile ./prototype-mobile
 WORKDIR /workspace/prototype-mobile
-RUN pnpm build
+RUN --mount=type=bind,from=runtime_bundle,source=.,target=/run/runtime-bundle,ro \
+    REALFOOD_RUNTIME_BUNDLE_SHA256="${RUNTIME_BUNDLE_SHA256}" \
+    node scripts/prepare-runtime-bundle.mjs "/run/runtime-bundle/${RUNTIME_BUNDLE_FILENAME}" && \
+    pnpm build
 
 FROM ${NODE_IMAGE} AS runner
 ENV NODE_ENV=production

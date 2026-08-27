@@ -1,0 +1,16 @@
+.git
+.scratch
+docs
+examples
+image-candidates
+knowledge
+raw
+private-deploy
+tools
+prototype-mobile/node_modules
+prototype-mobile/.next
+prototype-mobile/.generated
+prototype-mobile/test-results
+prototype-mobile/playwright-report
+prototype-mobile/server-assets/*/optimized
+prototype-mobile/server-assets/releases
