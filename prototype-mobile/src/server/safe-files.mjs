@@ -21,8 +21,11 @@ async function canonicalDirectoryRoot(root) {
   return fs.realpath(root);
 }
 
-export async function readRegularFile(root, filePath) {
-  const [canonicalRoot, stat] = await Promise.all([canonicalDirectoryRoot(root), fs.lstat(filePath)]);
+export async function readRegularFile(root, filePath, { authorizationRoot = root } = {}) {
+  const [canonicalAuthorizationRoot, canonicalRoot, stat] = await Promise.all([
+    canonicalDirectoryRoot(authorizationRoot), canonicalDirectoryRoot(root), fs.lstat(filePath),
+  ]);
+  if (!beneath(canonicalAuthorizationRoot, canonicalRoot)) throw new Error(`读取根越过授权目录：${root}`);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`只允许普通文件：${filePath}`);
   if (stat.nlink > 1) throw new Error(`拒绝多重硬链接文件：${filePath}`);
   const canonicalFile = await fs.realpath(filePath);
@@ -38,8 +41,11 @@ export async function readRegularFile(root, filePath) {
   }
 }
 
-export async function regularFiles(root, { skipTopLevel = [] } = {}) {
-  const canonicalRoot = await canonicalDirectoryRoot(root);
+export async function regularFiles(root, { skipTopLevel = [], authorizationRoot = root } = {}) {
+  const [canonicalAuthorizationRoot, canonicalRoot] = await Promise.all([
+    canonicalDirectoryRoot(authorizationRoot), canonicalDirectoryRoot(root),
+  ]);
+  if (!beneath(canonicalAuthorizationRoot, canonicalRoot)) throw new Error(`遍历根越过授权目录：${root}`);
   const result = [];
   async function visit(directory, depth) {
     const entries = await fs.readdir(directory, { withFileTypes: true });
@@ -67,11 +73,8 @@ export async function regularFiles(root, { skipTopLevel = [] } = {}) {
 
 export function safeReportCode(value) {
   validatePathSegment(path.basename(value));
-  const escaped = String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-  return `<code>${escaped}</code>`;
+  const text = String(value);
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  return `${fence} ${text} ${fence}`;
 }

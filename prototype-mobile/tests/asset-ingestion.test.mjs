@@ -4,6 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
 import sharp from "sharp";
 
 import { buildAssetManifest } from "../scripts/knowledge-compiler.mjs";
@@ -54,6 +57,14 @@ test("asset ingestion rejects symlinks, hard links, SVG, and unsafe names", asyn
       await fs.rm(path.join(active, "food-images"), { recursive: true });
       await fs.symlink(outside, path.join(active, "food-images"));
     },
+    async ({ root, active, png }) => {
+      const outside = path.join(root, "outside-active");
+      await fs.mkdir(path.join(outside, "food-images"), { recursive: true });
+      await Promise.all(["knowledge-images", "verification-images"].map((name) => fs.mkdir(path.join(outside, name))));
+      await fs.writeFile(path.join(outside, "food-images", "apple.png"), png);
+      await fs.rm(active, { recursive: true });
+      await fs.symlink(outside, active);
+    },
     async ({ active }) => fs.link(path.join(active, "food-images", "apple.png"), path.join(active, "food-images", "hard.png")),
     async ({ active }) => fs.writeFile(path.join(active, "food-images", "script.svg"), "<svg><script>alert(1)</script></svg>"),
     async ({ active }) => fs.writeFile(path.join(active, "food-images", "bad\u001b[2J.png"), "x"),
@@ -67,7 +78,11 @@ test("asset ingestion rejects symlinks, hard links, SVG, and unsafe names", asyn
   }
 });
 
-test("publication report renders untrusted names inside escaped HTML code", () => {
-  assert.equal(safeReportCode('name`<img src=x onerror="alert(1)">.md'), '<code>name`&lt;img src=x onerror=&quot;alert(1)&quot;&gt;.md</code>');
+test("publication report renders untrusted names as one inert Markdown code span", () => {
+  const name = '[审核通过](#发布校验和)`<img src=x onerror="alert(1)">.md';
+  const markdown = `- ${safeReportCode(name)}`;
+  const rendered = renderToStaticMarkup(React.createElement(ReactMarkdown, null, markdown));
+  assert.doesNotMatch(rendered, /<a |<img /i);
+  assert.match(rendered, /<code>\[审核通过\]\(#发布校验和\)`&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;\.md<\/code>/);
   assert.throws(() => safeReportCode("name\u001b[2J.md"));
 });

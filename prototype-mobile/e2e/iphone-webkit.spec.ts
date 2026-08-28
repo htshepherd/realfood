@@ -463,3 +463,42 @@ test("退出代际会丢弃仍在途的收藏写入", async ({ page }) => {
   await expect(page.getByPlaceholder("密码")).toBeVisible();
   await expect.poll(() => page.evaluate(async () => (await indexedDB.databases()).filter((database) => database.name === "ihealth-private-v1").length)).toBe(0);
 });
+
+test("退出代际会丢弃仍在途的旧缓存迁移", async ({ page }) => {
+  await login(page);
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("ihealth-private-v1", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const accountId = "00000000-0000-0000-0000-000000000001";
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction("private-data", "readwrite");
+      const store = transaction.objectStore("private-data");
+      const releaseRequest = store.get(`account:${accountId}:release`);
+      const favoritesRequest = store.get(`account:${accountId}:favorites`);
+      releaseRequest.onsuccess = () => store.put(releaseRequest.result, "release");
+      favoritesRequest.onsuccess = () => store.put(favoritesRequest.result, "favorites");
+      store.delete(`account:${accountId}:release`);
+      store.delete(`account:${accountId}:favorites`);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  });
+  await page.addInitScript(() => {
+    const originalPut = IDBObjectStore.prototype.put;
+    let fired = false;
+    IDBObjectStore.prototype.put = function(value, key) {
+      if (!fired && String(key).endsWith(":release")) {
+        fired = true;
+        window.dispatchEvent(new StorageEvent("storage", { key: "ihealth-logout-generation", newValue: `race:${Date.now()}` }));
+      }
+      return originalPut.call(this, value, key);
+    };
+  });
+  await page.reload();
+  await expect(page.getByPlaceholder("密码")).toBeVisible();
+  await expect.poll(() => page.evaluate(async () => (await indexedDB.databases()).filter((database) => database.name === "ihealth-private-v1").length)).toBe(0);
+});

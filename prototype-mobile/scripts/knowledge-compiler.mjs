@@ -545,6 +545,7 @@ function categoryFor(metadata, collection) {
 }
 
 async function buildRawOrder(rawRoot) {
+  await regularFiles(rawRoot);
   const result = new Map();
   for (const entry of await fs.readdir(rawRoot, { withFileTypes: true })) {
     validatePathSegment(entry.name);
@@ -560,8 +561,8 @@ async function buildRawOrder(rawRoot) {
   return result;
 }
 
-async function markdownFiles(directory) {
-  return (await regularFiles(directory)).filter((file) => file.endsWith(".md") && path.basename(file) !== "index.md");
+async function markdownFiles(directory, knowledgeRoot) {
+  return (await regularFiles(directory, { authorizationRoot: knowledgeRoot })).filter((file) => file.endsWith(".md") && path.basename(file) !== "index.md");
 }
 
 function sha256(value) {
@@ -574,11 +575,11 @@ async function buildAssetManifest(assetRoot, options = {}) {
   const items = [];
   for (const bucket of ["food-images", "knowledge-images", "verification-images"]) {
     const directory = path.join(assetRoot, bucket);
-    for (const filePath of await regularFiles(directory, { skipTopLevel: ["optimized"] })) {
+    for (const filePath of await regularFiles(directory, { skipTopLevel: ["optimized"], authorizationRoot: assetRoot })) {
       if (path.extname(filePath).toLowerCase() !== ".png") throw new Error(`只允许 PNG 原始资源：${filePath}`);
       const filename = path.basename(filePath);
       validatePathSegment(filename);
-      const sourceBytes = await readRegularFile(directory, filePath);
+      const sourceBytes = await readRegularFile(directory, filePath, { authorizationRoot: assetRoot });
       const sourceMetadata = await sharp(sourceBytes).metadata();
       if (sourceMetadata.format !== "png" || !sourceMetadata.width || !sourceMetadata.height) throw new Error(`不是有效 PNG：${bucket}/${filename}`);
       const bytes = await sharp(sourceBytes).rotate().png({ compressionLevel: 9, adaptiveFiltering: false, palette: false }).toBuffer();
@@ -815,12 +816,12 @@ export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRo
 
   for (const [relativeDirectory, collection] of COLLECTIONS) {
     const directory = path.join(knowledgeRoot, relativeDirectory);
-    for (const filePath of await markdownFiles(directory)) {
+    for (const filePath of await markdownFiles(directory, knowledgeRoot)) {
       const relativeFile = path.relative(knowledgeRoot, filePath).replaceAll(path.sep, "/");
       if (relativeDirectory === "references" && relativeFile.startsWith("references/taxonomies/")) continue;
       const slug = path.basename(filePath, ".md");
       const id = `${relativeDirectory}/${slug}`;
-      const markdown = (await readRegularFile(directory, filePath)).toString("utf8");
+      const markdown = (await readRegularFile(directory, filePath, { authorizationRoot: knowledgeRoot })).toString("utf8");
       const { body, metadata } = parseFrontmatter(markdown, relativeFile);
       if (!metadata.type || !metadata.title || !metadata.scope) throw new Error(`缺少必填元数据：${relativeFile}`);
       const surface = surfaceForType(metadata.type);

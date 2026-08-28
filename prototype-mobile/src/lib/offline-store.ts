@@ -2,30 +2,54 @@ const DATABASE_NAME = "ihealth-private-v1";
 const STORE_NAME = "private-data";
 let privacyEpoch = 0;
 
+export function captureOfflineEpoch() {
+  return privacyEpoch;
+}
+
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME);
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function readOffline<T>(key: string): Promise<T | null> {
-  if (typeof indexedDB === "undefined") return null;
+async function discardOpenedDatabase(database: IDBDatabase) {
+  database.close();
+  await deleteDatabase();
+}
+
+export async function readOffline<T>(key: string, expectedEpoch = privacyEpoch): Promise<T | null> {
+  if (typeof indexedDB === "undefined" || expectedEpoch !== privacyEpoch) return null;
   const database = await openDatabase();
-  return new Promise((resolve, reject) => {
+  if (expectedEpoch !== privacyEpoch) {
+    await discardOpenedDatabase(database);
+    return null;
+  }
+  let value: T | null = null;
+  await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readonly");
     const request = transaction.objectStore(STORE_NAME).get(key);
-    request.onsuccess = () => resolve((request.result as T | undefined) ?? null);
+    request.onsuccess = () => { value = (request.result as T | undefined) ?? null; };
     request.onerror = () => reject(request.error);
-    transaction.oncomplete = () => database.close();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
+  database.close();
+  return expectedEpoch === privacyEpoch ? value : null;
 }
 
-export async function writeOffline(key: string, value: unknown) {
-  const epoch = privacyEpoch;
+export async function writeOffline(key: string, value: unknown, expectedEpoch = privacyEpoch) {
+  if (typeof indexedDB === "undefined" || expectedEpoch !== privacyEpoch) return false;
   const database = await openDatabase();
+  if (expectedEpoch !== privacyEpoch) {
+    await discardOpenedDatabase(database);
+    return false;
+  }
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readwrite");
     transaction.objectStore(STORE_NAME).put(value, key);
@@ -33,12 +57,20 @@ export async function writeOffline(key: string, value: unknown) {
     transaction.onerror = () => reject(transaction.error);
   });
   database.close();
-  if (epoch !== privacyEpoch) await deleteDatabase();
+  if (expectedEpoch !== privacyEpoch) {
+    await deleteDatabase();
+    return false;
+  }
+  return true;
 }
 
-export async function deleteOffline(key: string) {
-  if (typeof indexedDB === "undefined") return;
+export async function deleteOffline(key: string, expectedEpoch = privacyEpoch) {
+  if (typeof indexedDB === "undefined" || expectedEpoch !== privacyEpoch) return false;
   const database = await openDatabase();
+  if (expectedEpoch !== privacyEpoch) {
+    await discardOpenedDatabase(database);
+    return false;
+  }
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(STORE_NAME, "readwrite");
     transaction.objectStore(STORE_NAME).delete(key);
@@ -46,6 +78,11 @@ export async function deleteOffline(key: string) {
     transaction.onerror = () => reject(transaction.error);
   });
   database.close();
+  if (expectedEpoch !== privacyEpoch) {
+    await deleteDatabase();
+    return false;
+  }
+  return true;
 }
 
 export async function clearOfflineData() {
@@ -64,7 +101,6 @@ async function deleteDatabase() {
       const request = indexedDB.deleteDatabase(DATABASE_NAME);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
-      request.onblocked = () => resolve();
     });
   }
 }

@@ -27,7 +27,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { clearOfflineData, deleteOffline, readOffline, writeOffline } from "@/src/lib/offline-store";
+import { captureOfflineEpoch, clearOfflineData, deleteOffline, readOffline, writeOffline } from "@/src/lib/offline-store";
 
 type SlotGroup = { title: string; markdown: string; text: string; itemCount: number; links: { title: string; href: string; slug: string }[]; summary: string; subgroups: SlotGroup[]; deficiencyRole?: "symptoms" | "risk" };
 type KnowledgeSlot = { key: string; label: string; sourceTitle: string; markdown: string; text: string; groups: SlotGroup[] };
@@ -281,6 +281,7 @@ function Login({ onSuccess }: { onSuccess: (account: Account) => void }) {
   const [pending, setPending] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setPending(true);
+    const storageEpoch = captureOfflineEpoch();
     const values = new FormData(event.currentTarget);
     try {
       if (localStorage.getItem("ihealth-logout-pending") === "1") {
@@ -291,7 +292,7 @@ function Login({ onSuccess }: { onSuccess: (account: Account) => void }) {
         method: "POST",
         body: JSON.stringify({ username: values.get("username"), password: values.get("password"), deviceName: navigator.userAgent }),
       });
-      await writeOffline("account", result.account); onSuccess(result.account);
+      if (await writeOffline("account", result.account, storageEpoch)) onSuccess(result.account);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "登录失败"); }
     finally { setPending(false); }
   }
@@ -707,21 +708,21 @@ export function HandbookApp() {
   const [selected, setSelected] = useState<KnowledgeItem | null>(null); const [search, setSearch] = useState(""); const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
   const accountKey = (accountId: string, key: string) => `account:${accountId}:${key}`;
-  async function readAccountOffline<T>(owner: Account, key: string, allowLegacy: boolean): Promise<T | null> {
+  async function readAccountOffline<T>(owner: Account, key: string, allowLegacy: boolean, storageEpoch: number): Promise<T | null> {
     const scopedKey = accountKey(owner.id, key);
-    const scoped = await readOffline<T>(scopedKey);
+    const scoped = await readOffline<T>(scopedKey, storageEpoch);
     if (scoped !== null) {
-      if (allowLegacy) await deleteOffline(key);
+      if (allowLegacy) await deleteOffline(key, storageEpoch);
       return scoped;
     }
     if (!allowLegacy) return null;
-    const legacy = await readOffline<T>(key);
+    const legacy = await readOffline<T>(key, storageEpoch);
     if (legacy === null) return null;
     const migrated = key === "favorite-queue"
       ? (legacy as FavoriteOperation[]).map((operation) => ({ ...operation, accountId: owner.id })) as T
       : legacy;
-    await writeOffline(scopedKey, migrated);
-    await deleteOffline(key);
+    if (!await writeOffline(scopedKey, migrated, storageEpoch)) return null;
+    await deleteOffline(key, storageEpoch);
     return migrated;
   }
   function clearRenderedPrivateState() {
@@ -745,14 +746,15 @@ export function HandbookApp() {
 
   async function loadPrivateData(knownAccount?: Account | null) {
     const generation = privacyGeneration.current;
+    const storageEpoch = captureOfflineEpoch();
     if (!knownAccount && localStorage.getItem("ihealth-logout-pending") === "1") {
       try { await api("/api/v1/auth/logout", { method: "POST" }); localStorage.removeItem("ihealth-logout-pending"); }
       catch { setLoading(false); return; }
     }
-    const cachedAccount = knownAccount ?? await readOffline<Account>("account");
+    const cachedAccount = knownAccount ?? await readOffline<Account>("account", storageEpoch);
     const allowLegacy = !knownAccount;
-    const cachedRelease = cachedAccount ? await readAccountOffline<Release>(cachedAccount, "release", allowLegacy) : null;
-    const cachedFavorites = cachedAccount ? await readAccountOffline<string[]>(cachedAccount, "favorites", allowLegacy) : null;
+    const cachedRelease = cachedAccount ? await readAccountOffline<Release>(cachedAccount, "release", allowLegacy, storageEpoch) : null;
+    const cachedFavorites = cachedAccount ? await readAccountOffline<string[]>(cachedAccount, "favorites", allowLegacy, storageEpoch) : null;
     if (generation === privacyGeneration.current && cachedAccount && cachedRelease) {
       setAccount(cachedAccount); setRelease(cachedRelease); setFavoriteIds(new Set(cachedFavorites ?? [])); setLoading(false);
     }
@@ -763,7 +765,7 @@ export function HandbookApp() {
       if (!(await validRelease(freshRelease))) throw new Error("知识版本校验失败");
       await prefetchSearch(freshRelease);
       const queueKey = accountKey(me.account.id, "favorite-queue");
-      const pending = await readAccountOffline<FavoriteOperation[]>(me.account, "favorite-queue", allowLegacy && cachedAccount?.id === me.account.id) ?? [];
+      const pending = await readAccountOffline<FavoriteOperation[]>(me.account, "favorite-queue", allowLegacy && cachedAccount?.id === me.account.id, storageEpoch) ?? [];
       const remaining: FavoriteOperation[] = [];
       for (const operation of pending) {
         if (operation.accountId !== me.account.id || generation !== privacyGeneration.current) continue;
@@ -771,12 +773,12 @@ export function HandbookApp() {
         catch { remaining.push(operation); }
       }
       if (generation !== privacyGeneration.current) return;
-      await writeOffline(queueKey, remaining);
+      await writeOffline(queueKey, remaining, storageEpoch);
       if (generation !== privacyGeneration.current) return;
       const serverFavorites = await api<{ items: { objectId: string; deleted: boolean }[] }>("/api/v1/favorites");
       const ids = serverFavorites.items.filter((item) => !item.deleted).map((item) => item.objectId);
       if (generation !== privacyGeneration.current) return;
-      await Promise.all([writeOffline("account", me.account), writeOffline(accountKey(me.account.id, "release"), freshRelease), writeOffline(accountKey(me.account.id, "favorites"), ids)]);
+      await Promise.all([writeOffline("account", me.account, storageEpoch), writeOffline(accountKey(me.account.id, "release"), freshRelease, storageEpoch), writeOffline(accountKey(me.account.id, "favorites"), ids, storageEpoch)]);
       if (generation !== privacyGeneration.current) return;
       setAccount(me.account); setRelease(freshRelease); setFavoriteIds(new Set(ids));
     } catch (caught) {
@@ -821,18 +823,18 @@ export function HandbookApp() {
   }
   async function toggleFavorite(item: KnowledgeItem) {
     if (!account) return;
-    const accountId = account.id; const generation = privacyGeneration.current; const queueKey = accountKey(accountId, "favorite-queue");
+    const accountId = account.id; const generation = privacyGeneration.current; const storageEpoch = captureOfflineEpoch(); const queueKey = accountKey(accountId, "favorite-queue");
     const next = new Set(favoriteIds); const favorite = !next.has(item.id); favorite ? next.add(item.id) : next.delete(item.id); setFavoriteIds(next);
     if (generation !== privacyGeneration.current) return;
-    await writeOffline(accountKey(accountId, "favorites"), [...next]);
+    await writeOffline(accountKey(accountId, "favorites"), [...next], storageEpoch);
     if (generation !== privacyGeneration.current) return;
     const operation = { accountId, objectId: item.id, favorite, updatedAt: new Date().toISOString() };
-    const queue = (await readOffline<FavoriteOperation[]>(queueKey) ?? []).filter((entry) => entry.objectId !== item.id);
+    const queue = (await readOffline<FavoriteOperation[]>(queueKey, storageEpoch) ?? []).filter((entry) => entry.objectId !== item.id);
     if (generation !== privacyGeneration.current) return;
-    await writeOffline(queueKey, [...queue, operation]);
+    await writeOffline(queueKey, [...queue, operation], storageEpoch);
     try {
       await api("/api/v1/favorites", { method: "PUT", body: JSON.stringify(operation) });
-      if (generation === privacyGeneration.current) await writeOffline(queueKey, queue);
+      if (generation === privacyGeneration.current) await writeOffline(queueKey, queue, storageEpoch);
     } catch {}
   }
   if (loading && !release) return <div className="grid min-h-dvh place-items-center text-[14px] text-[var(--muted)]">正在打开家庭知识…</div>;
