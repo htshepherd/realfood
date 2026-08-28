@@ -17,7 +17,7 @@ function activeAssets(): AssetEntry[] {
   ]);
 }
 
-export async function GET(_request: Request, context: RouteContext<"/api/v1/assets/[bucket]/[...key]">) {
+export async function GET(_request: Request, context: { params: Promise<{ bucket: string; key: string[] }> }) {
   const session = await requireSession();
   if (session instanceof Response) return session;
   const { bucket, key: parts } = await context.params;
