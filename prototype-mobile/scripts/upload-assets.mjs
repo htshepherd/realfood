@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { verifyManifestDirectory } from "./asset-publication.mjs";
+import { verifyAssetManifest, verifyManifestDirectory } from "./asset-publication.mjs";
 
 for (const name of ["MINIO_ENDPOINT", "MINIO_BUCKET", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"]) {
   if (!process.env[name]) throw new Error(`缺少 ${name}`);
@@ -11,6 +11,7 @@ for (const name of ["MINIO_ENDPOINT", "MINIO_BUCKET", "MINIO_ACCESS_KEY", "MINIO
 const client = new S3Client({ endpoint: process.env.MINIO_ENDPOINT, region: process.env.MINIO_REGION ?? "us-east-1", forcePathStyle: true, credentials: { accessKeyId: process.env.MINIO_ACCESS_KEY, secretAccessKey: process.env.MINIO_SECRET_KEY } });
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const release = JSON.parse(await fs.readFile(path.join(appRoot, "src", "data", "release.json"), "utf8"));
+verifyAssetManifest(release.manifest.assets);
 const version = release.manifest.version;
 const root = path.join(appRoot, "server-assets", "assets", version);
 const entries = await verifyManifestDirectory(root, release.manifest.assets.items ?? []);

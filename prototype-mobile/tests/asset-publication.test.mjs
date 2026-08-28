@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { verifyManifestDirectory } from "../scripts/asset-publication.mjs";
+import { verifyAssetManifest, verifyManifestDirectory } from "../scripts/asset-publication.mjs";
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
@@ -21,6 +21,10 @@ test("publication accepts exactly the manifest allowlist and rejects extras or c
     key: "food-images/apple.png", bytes: original.length, checksum: sha256(original), mediaType: "image/png",
     optimized: { key: "food-images/optimized/apple.webp", bytes: optimized.length, checksum: sha256(optimized), mediaType: "image/webp" },
   }];
+
+  const manifest = { count: items.length, items, checksum: sha256(JSON.stringify(items)) };
+  assert.equal(verifyAssetManifest(manifest), items);
+  assert.throws(() => verifyAssetManifest({ ...manifest, items: [{ ...items[0], bytes: 99 }] }), /身份校验失败/);
 
   assert.equal((await verifyManifestDirectory(root, items)).length, 2);
   await fs.writeFile(path.join(root, "food-images", "extra.png"), original);

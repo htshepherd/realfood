@@ -36,6 +36,7 @@ async function recordAccountFailure(accountId: string) {
              CASE WHEN login_locked_until IS NOT NULL AND login_locked_until <= now()
                   THEN 1 ELSE failed_login_count + 1 END AS failure_count
         FROM accounts WHERE id = $1
+        FOR UPDATE
     )
     UPDATE accounts AS account
        SET failed_login_count = next.failure_count,
@@ -77,8 +78,6 @@ export async function POST(request: Request) {
   protection.ihealthSourceLimiter ??= new SourceAttemptLimiter();
   protection.ihealthVerificationGate ??= new VerificationGate(Number(process.env.PASSWORD_VERIFY_CONCURRENCY ?? 2));
   if (!protection.ihealthSourceLimiter.allowed(sourceKey)) return retryResponse();
-  if (account?.loginLockedUntil && new Date(account.loginLockedUntil).getTime() > Date.now()) return retryResponse();
-
   let passwordMatches = false;
   try {
     passwordMatches = await protection.ihealthVerificationGate.run(() => verifyPassword(body.password!, account?.passwordHash ?? DUMMY_PASSWORD_HASH));
@@ -86,6 +85,7 @@ export async function POST(request: Request) {
     if (error instanceof PasswordVerificationBusyError) return privateJson({ error: "登录服务繁忙，请稍后再试" }, { status: 429, headers: { "Retry-After": "1" } });
     throw error;
   }
+  if (account?.loginLockedUntil && new Date(account.loginLockedUntil).getTime() > Date.now()) return retryResponse();
   if (!account?.enabled || !passwordMatches) {
     protection.ihealthSourceLimiter.recordFailure(sourceKey);
     if (account) await recordAccountFailure(account.id);

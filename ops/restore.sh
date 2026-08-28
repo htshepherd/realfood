@@ -15,6 +15,7 @@ trap 'rm -rf "$restore_dir"' EXIT
 restic restore "$RESTORE_SNAPSHOT" --target "$restore_dir"
 dump_file="$restore_dir/postgres.dump"
 asset_dir="$restore_dir/minio"
+[ -z "$(find "$restore_dir" -mindepth 1 -maxdepth 1 ! -name postgres.dump ! -name minio -print -quit)" ] || { echo "快照根包含意外条目" >&2; exit 1; }
 [ -f "$dump_file" ] && [ ! -L "$dump_file" ] && [ "$(find "$dump_file" -type f -links 1 -print)" = "$dump_file" ] || { echo "固定数据库归档缺失或不安全" >&2; exit 1; }
 [ -d "$asset_dir" ] && [ ! -L "$asset_dir" ] || { echo "固定 MinIO 目录缺失或不安全" >&2; exit 1; }
 [ -z "$(find "$asset_dir" ! -type f ! -type d -print -quit)" ] || { echo "MinIO 备份含特殊文件" >&2; exit 1; }

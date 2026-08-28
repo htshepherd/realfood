@@ -27,7 +27,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { clearOfflineData, readOffline, writeOffline } from "@/src/lib/offline-store";
+import { clearOfflineData, deleteOffline, readOffline, writeOffline } from "@/src/lib/offline-store";
 
 type SlotGroup = { title: string; markdown: string; text: string; itemCount: number; links: { title: string; href: string; slug: string }[]; summary: string; subgroups: SlotGroup[]; deficiencyRole?: "symptoms" | "risk" };
 type KnowledgeSlot = { key: string; label: string; sourceTitle: string; markdown: string; text: string; groups: SlotGroup[] };
@@ -707,6 +707,23 @@ export function HandbookApp() {
   const [selected, setSelected] = useState<KnowledgeItem | null>(null); const [search, setSearch] = useState(""); const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
   const accountKey = (accountId: string, key: string) => `account:${accountId}:${key}`;
+  async function readAccountOffline<T>(owner: Account, key: string, allowLegacy: boolean): Promise<T | null> {
+    const scopedKey = accountKey(owner.id, key);
+    const scoped = await readOffline<T>(scopedKey);
+    if (scoped !== null) {
+      if (allowLegacy) await deleteOffline(key);
+      return scoped;
+    }
+    if (!allowLegacy) return null;
+    const legacy = await readOffline<T>(key);
+    if (legacy === null) return null;
+    const migrated = key === "favorite-queue"
+      ? (legacy as FavoriteOperation[]).map((operation) => ({ ...operation, accountId: owner.id })) as T
+      : legacy;
+    await writeOffline(scopedKey, migrated);
+    await deleteOffline(key);
+    return migrated;
+  }
   function clearRenderedPrivateState() {
     privacyGeneration.current += 1;
     setAccount(null); setRelease(null); setFavoriteIds(new Set()); setSelected(null);
@@ -733,8 +750,9 @@ export function HandbookApp() {
       catch { setLoading(false); return; }
     }
     const cachedAccount = knownAccount ?? await readOffline<Account>("account");
-    const cachedRelease = cachedAccount ? await readOffline<Release>(accountKey(cachedAccount.id, "release")) : null;
-    const cachedFavorites = cachedAccount ? await readOffline<string[]>(accountKey(cachedAccount.id, "favorites")) : null;
+    const allowLegacy = !knownAccount;
+    const cachedRelease = cachedAccount ? await readAccountOffline<Release>(cachedAccount, "release", allowLegacy) : null;
+    const cachedFavorites = cachedAccount ? await readAccountOffline<string[]>(cachedAccount, "favorites", allowLegacy) : null;
     if (generation === privacyGeneration.current && cachedAccount && cachedRelease) {
       setAccount(cachedAccount); setRelease(cachedRelease); setFavoriteIds(new Set(cachedFavorites ?? [])); setLoading(false);
     }
@@ -745,7 +763,7 @@ export function HandbookApp() {
       if (!(await validRelease(freshRelease))) throw new Error("知识版本校验失败");
       await prefetchSearch(freshRelease);
       const queueKey = accountKey(me.account.id, "favorite-queue");
-      const pending = await readOffline<FavoriteOperation[]>(queueKey) ?? [];
+      const pending = await readAccountOffline<FavoriteOperation[]>(me.account, "favorite-queue", allowLegacy && cachedAccount?.id === me.account.id) ?? [];
       const remaining: FavoriteOperation[] = [];
       for (const operation of pending) {
         if (operation.accountId !== me.account.id || generation !== privacyGeneration.current) continue;
@@ -754,16 +772,19 @@ export function HandbookApp() {
       }
       if (generation !== privacyGeneration.current) return;
       await writeOffline(queueKey, remaining);
+      if (generation !== privacyGeneration.current) return;
       const serverFavorites = await api<{ items: { objectId: string; deleted: boolean }[] }>("/api/v1/favorites");
       const ids = serverFavorites.items.filter((item) => !item.deleted).map((item) => item.objectId);
       if (generation !== privacyGeneration.current) return;
       await Promise.all([writeOffline("account", me.account), writeOffline(accountKey(me.account.id, "release"), freshRelease), writeOffline(accountKey(me.account.id, "favorites"), ids)]);
+      if (generation !== privacyGeneration.current) return;
       setAccount(me.account); setRelease(freshRelease); setFavoriteIds(new Set(ids));
     } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 401) { await clearOfflineData(); setAccount(null); setRelease(null); setFavoriteIds(new Set()); }
+      if (generation !== privacyGeneration.current) return;
+      if (caught instanceof ApiError && caught.status === 401) { clearRenderedPrivateState(); await clearOfflineData(); }
       else if (!cachedAccount || !cachedRelease) { setAccount(null); setRelease(null); }
     }
-    finally { setLoading(false); }
+    finally { if (generation === privacyGeneration.current) setLoading(false); }
   }
   useEffect(() => {
     if (initialLoadStarted.current) return;

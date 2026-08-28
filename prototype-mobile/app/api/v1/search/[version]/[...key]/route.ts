@@ -1,9 +1,10 @@
-import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import { requireSession } from "@/src/server/auth";
 import { e2eMode } from "@/src/server/e2e-mode";
 import { release } from "@/src/server/release";
+import { readRegularFile, validatePathSegment } from "@/src/server/safe-files.mjs";
 
 const contentTypes: Record<string, string> = {
   ".js": "text/javascript; charset=utf-8",
@@ -15,7 +16,8 @@ export async function GET(_request: Request, context: { params: Promise<{ versio
   const session = await requireSession();
   if (session instanceof Response) return session;
   const { version, key: parts } = await context.params;
-  if (version !== release.manifest.version || parts.some((part) => !part || part === "." || part === "..")) {
+  try { parts.forEach(validatePathSegment); } catch { return new Response("搜索版本不存在", { status: 404 }); }
+  if (version !== release.manifest.version) {
     return new Response("搜索版本不存在", { status: 404 });
   }
   const key = parts.join("/");
@@ -26,9 +28,10 @@ export async function GET(_request: Request, context: { params: Promise<{ versio
     ? path.join(process.cwd(), ".generated", "candidate", "pagefind")
     : path.join(process.cwd(), "server-assets", "pagefind", version);
   const filePath = path.join(root, ...parts);
-  if (!filePath.startsWith(`${root}${path.sep}`)) return new Response("无效路径", { status: 400 });
   try {
-    return new Response(await fs.readFile(filePath), {
+    const body = await readRegularFile(root, filePath);
+    if (body.length !== expected.bytes || createHash("sha256").update(body).digest("hex") !== expected.checksum) return new Response("搜索文件不存在", { status: 404 });
+    return new Response(body, {
       headers: {
         "Content-Type": contentTypes[path.extname(key)] ?? "application/octet-stream",
         "Cache-Control": "private, no-store",

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { copyVerifiedAssets } from "./asset-publication.mjs";
+import { copyVerifiedAssets, verifyAssetManifest } from "./asset-publication.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, "..");
@@ -16,6 +16,7 @@ if (!process.argv.includes("--confirm")) {
 }
 
 const release = JSON.parse(await fs.readFile(releaseSource, "utf8"));
+verifyAssetManifest(release.manifest.assets);
 const activeDataRoot = path.join(appRoot, "src", "data");
 const privatePagefindRoot = path.join(appRoot, "server-assets", "pagefind", release.manifest.version);
 const releaseHistoryRoot = path.join(appRoot, "server-assets", "releases");

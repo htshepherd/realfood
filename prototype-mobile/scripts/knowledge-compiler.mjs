@@ -578,11 +578,13 @@ async function buildAssetManifest(assetRoot, options = {}) {
       if (path.extname(filePath).toLowerCase() !== ".png") throw new Error(`只允许 PNG 原始资源：${filePath}`);
       const filename = path.basename(filePath);
       validatePathSegment(filename);
-      const bytes = await readRegularFile(directory, filePath);
+      const sourceBytes = await readRegularFile(directory, filePath);
+      const sourceMetadata = await sharp(sourceBytes).metadata();
+      if (sourceMetadata.format !== "png" || !sourceMetadata.width || !sourceMetadata.height) throw new Error(`不是有效 PNG：${bucket}/${filename}`);
+      const bytes = await sharp(sourceBytes).rotate().png({ compressionLevel: 9, adaptiveFiltering: false, palette: false }).toBuffer();
       const metadata = await sharp(bytes).metadata();
-      if (metadata.format !== "png" || !metadata.width || !metadata.height) throw new Error(`不是有效 PNG：${bucket}/${filename}`);
       const optimizedKey = `${bucket}/optimized/${path.basename(filename, ".png")}.webp`;
-      const optimizedBytes = await sharp(bytes).rotate().webp({ lossless: true, effort: 4 }).toBuffer();
+      const optimizedBytes = await sharp(bytes).webp({ lossless: true, effort: 4 }).toBuffer();
       const optimizedMetadata = await sharp(optimizedBytes).metadata();
       if (metadata.width !== optimizedMetadata.width || metadata.height !== optimizedMetadata.height) {
         throw new Error(`优化图片尺寸发生变化：${bucket}/${filename}`);

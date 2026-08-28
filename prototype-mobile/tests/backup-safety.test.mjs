@@ -32,6 +32,7 @@ test("backup and restore use one exact snapshot-root database archive", async ()
   assert.match(backup, /cd "\$payload_dir"/);
   assert.match(backup, /restic backup postgres\.dump minio/);
   assert.match(restore, /dump_file="\$restore_dir\/postgres\.dump"/);
+  assert.match(restore, /快照根包含意外条目/);
   assert.doesNotMatch(restore, /find .*postgres\.dump.*head/);
   assert.match(restore, /pg_restore --list "\$dump_file"/);
   assert.ok(restore.indexOf("pg_restore --list") < restore.indexOf('[ "$RESTORE_CONFIRM" = "I_UNDERSTAND" ]'));
@@ -41,7 +42,7 @@ test("backup image pins the base, Restic, and architecture-specific verified Min
   const dockerfile = await fs.readFile(path.join(projectRoot, "ops", "Dockerfile.backup"), "utf8");
   assert.match(dockerfile, /^ARG POSTGRES_IMAGE=postgres:16-alpine@sha256:[a-f0-9]{64}$/m);
   assert.match(dockerfile, /^FROM \$\{POSTGRES_IMAGE\}$/m);
-  assert.match(dockerfile, /restic=0\.18\.1-r0/);
+  assert.match(dockerfile, /restic=0\.18\.1-r7/);
   assert.match(dockerfile, /MC_VERSION=RELEASE\.2025-07-21T05-28-08Z/);
   assert.match(dockerfile, /MC_SHA256_AMD64=[a-f0-9]{64}/);
   assert.match(dockerfile, /MC_SHA256_ARM64=[a-f0-9]{64}/);
@@ -87,4 +88,18 @@ test("restore ignores a decoy database archive inside the MinIO subtree", async 
   const calls = await fs.readFile(log, "utf8");
   assert.match(calls, /pg_restore --list \/tmp\/ihealth-restore\.[^/]+\/postgres\.dump/);
   assert.doesNotMatch(calls, /pg_restore .*\/minio\/postgres\.dump/);
+});
+
+test("restore rejects unexpected entries at the snapshot root", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "realfood-restore-extra-test-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const bin = path.join(root, "bin");
+  await fs.mkdir(bin);
+  await executable(path.join(bin, "restic"), '#!/bin/sh\nwhile [ "$1" != "--target" ]; do shift; done\nshift\ntarget="$1"\nmkdir -p "$target/minio"\nprintf real > "$target/postgres.dump"\nprintf extra > "$target/unexpected.dump"\n');
+  for (const name of ["pg_restore", "mc"]) await executable(path.join(bin, name), "#!/bin/sh\nexit 99\n");
+  await assert.rejects(execFileAsync("sh", [path.join(projectRoot, "ops", "restore.sh")], { env: {
+    ...process.env, PATH: `${bin}:${process.env.PATH}`, RESTORE_SNAPSHOT: "snapshot", RESTORE_CONFIRM: "I_UNDERSTAND",
+    DATABASE_URL: "postgresql://test", MINIO_ACCESS_KEY: "x", MINIO_SECRET_KEY: "x", MINIO_BUCKET: "x",
+    RESTIC_REPOSITORY: "local:test", RESTIC_PASSWORD: "test",
+  } }), (error) => error?.stderr?.includes("快照根包含意外条目"));
 });

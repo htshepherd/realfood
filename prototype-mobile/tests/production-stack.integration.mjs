@@ -68,9 +68,37 @@ const database = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await database.connect();
 try {
   const accountRow = await database.query("SELECT id FROM accounts WHERE lower(username) = lower($1)", [accountA.username]);
+  const accountBRow = await database.query("SELECT id FROM accounts WHERE lower(username) = lower($1)", [accountB.username]);
   assert.equal(accountRow.rowCount, 1);
+  assert.equal(accountBRow.rowCount, 1);
   const rows = await database.query("SELECT count(*)::int AS count FROM favorites WHERE account_id = $1 AND object_id = $2", [accountRow.rows[0].id, objectId]);
   assert.equal(rows.rows[0].count, 1);
+
+  const loginFailure = (username, password) => fetch(`${baseUrl}/api/v1/auth/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }),
+  });
+  const wrong = await loginFailure(accountB.username, "definitely-wrong");
+  const unknown = await loginFailure(`missing-${Date.now()}`, "definitely-wrong");
+  await database.query("UPDATE accounts SET enabled = false WHERE id = $1", [accountBRow.rows[0].id]);
+  const disabled = await loginFailure(accountB.username, accountB.password);
+  await database.query("UPDATE accounts SET enabled = true, failed_login_count = 0, login_locked_until = NULL WHERE id = $1", [accountBRow.rows[0].id]);
+  assert.deepEqual(
+    await Promise.all([wrong, unknown, disabled].map(async (response) => ({ status: response.status, body: await response.text() }))),
+    Array(3).fill({ status: 401, body: '{"error":"账号或密码不正确"}' }),
+  );
+
+  await database.query("UPDATE accounts SET failed_login_count = 8, login_locked_until = NULL WHERE id = $1", [accountBRow.rows[0].id]);
+  assert.deepEqual((await Promise.all([
+    loginFailure(accountB.username, "concurrent-wrong-1"),
+    loginFailure(accountB.username, "concurrent-wrong-2"),
+  ])).map((response) => response.status), [401, 401]);
+  const targetState = await database.query("SELECT failed_login_count, login_locked_until FROM accounts WHERE id = $1", [accountBRow.rows[0].id]);
+  assert.equal(targetState.rows[0].failed_login_count, 10);
+  assert.ok(targetState.rows[0].login_locked_until);
+  await signIn(accountA);
+  assert.equal((await loginFailure(accountB.username, accountB.password)).status, 429, "账户 A 登录不能清除账户 B 的目标锁");
+  await database.query("UPDATE accounts SET failed_login_count = 0, login_locked_until = NULL WHERE id = $1", [accountBRow.rows[0].id]);
+
   await execFileAsync(process.execPath, ["scripts/manage-account.mjs", "disable", accountA.username], { cwd: appRoot, env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL } });
   assert.equal((await request("/api/v1/auth/me", cookieA)).status, 401);
 } finally {

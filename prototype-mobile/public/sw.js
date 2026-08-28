@@ -1,5 +1,6 @@
 const CACHE = "ihealth-private-v1";
 const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png"];
+let privacyGeneration = 0;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
@@ -17,10 +18,17 @@ self.addEventListener("fetch", (event) => {
   const isPrivateApi = url.pathname.startsWith("/api/v1/");
   const isKnowledgeAsset = url.pathname.startsWith("/api/v1/search/") || url.pathname.startsWith("/api/v1/assets/");
 
+  const generation = privacyGeneration;
   event.respondWith(fetch(event.request).then((response) => {
     if (response.ok && (!isPrivateApi || isKnowledgeAsset || url.pathname === "/api/v1/releases/current")) {
       const copy = response.clone();
-      event.waitUntil(caches.open(CACHE).then((cache) => cache.put(event.request, copy)));
+      event.waitUntil((async () => {
+        if (generation !== privacyGeneration) return;
+        const cache = await caches.open(CACHE);
+        if (generation !== privacyGeneration) return;
+        await cache.put(event.request, copy);
+        if (generation !== privacyGeneration) await cache.delete(event.request);
+      })());
     }
     return response;
   }).catch(async () => {
@@ -32,5 +40,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data?.type === "CLEAR_PRIVATE_DATA") event.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))));
+  if (event.data?.type === "CLEAR_PRIVATE_DATA") {
+    privacyGeneration += 1;
+    event.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))));
+  }
 });

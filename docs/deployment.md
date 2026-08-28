@@ -2,7 +2,7 @@
 
 对公网只开放 Caddy 的 80/443。PostgreSQL、MinIO API 与 MinIO 管理端均只在 Compose 内网可达。
 
-1. 复制 `.env.example` 为 `.env`，填写公网域名和随机密钥；域名 A/AAAA 记录指向 ECS。
+1. 复制 `.env.example` 为 `.env`，填写公网域名和每一项独立随机密钥；MinIO 根、只读应用和发布器三组凭据不得复用。域名 A/AAAA 记录指向 ECS。
 2. 把私有运行时包保存在 Git 工作区之外，或放入已忽略的 `private-deploy/`，在 `.env` 设置其目录 `RUNTIME_BUNDLE_CONTEXT`、文件名 `RUNTIME_BUNDLE_FILENAME` 和校验值 `RUNTIME_BUNDLE_SHA256`。BuildKit 以独立只读命名上下文挂载该目录，不会把压缩包加入 Git 或普通源码构建上下文。
 3. 运行 `docker compose up -d --build`。如果工作区已经包含经校验的活动运行时文件，构建会直接使用；干净检出则从只读命名上下文校验并解压。Caddy 会为公网域名自动申请和续期 HTTPS 证书。
 4. 首次配置固定家庭账号：临时设置 `SEED_ACCOUNTS_JSON`，运行 `docker compose run --rm app node scripts/seed-accounts.mjs`，完成后立即删除该变量。

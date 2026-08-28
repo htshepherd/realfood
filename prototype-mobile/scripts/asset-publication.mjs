@@ -7,6 +7,14 @@ import { readRegularFile, regularFiles, validatePathSegment } from "../src/serve
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const ALLOWED_MEDIA = new Set(["image/png", "image/webp"]);
 
+export function verifyAssetManifest(manifest) {
+  if (!manifest || !Array.isArray(manifest.items) || manifest.count !== manifest.items.length || sha256(JSON.stringify(manifest.items)) !== manifest.checksum) {
+    throw new Error("资源清单身份校验失败");
+  }
+  manifestEntries(manifest.items);
+  return manifest.items;
+}
+
 export function manifestEntries(items) {
   return items.flatMap((item) => [
     { key: item.key, bytes: item.bytes, checksum: item.checksum, mediaType: item.mediaType },

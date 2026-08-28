@@ -40,11 +40,30 @@ services:
     image: "${MINIO_MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-07-21T05-28-08Z}"
     depends_on: [minio]
     entrypoint: ["/bin/sh", "-c"]
-    command: ["until mc alias set local http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY; do sleep 2; done; mc mb --ignore-existing local/$$MINIO_BUCKET; mc anonymous set none local/$$MINIO_BUCKET"]
+    command:
+      - |
+        set -eu
+        until mc alias set local http://minio:9000 "$${MINIO_ACCESS_KEY}" "$${MINIO_SECRET_KEY}"; do sleep 2; done
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
+        mc anonymous set none "local/$${MINIO_BUCKET}"
+        sed "s/__BUCKET__/$${MINIO_BUCKET}/g" /policies/minio-app-policy.json > /tmp/minio-app-policy.json
+        sed "s/__BUCKET__/$${MINIO_BUCKET}/g" /policies/minio-publish-policy.json > /tmp/minio-publish-policy.json
+        mc admin user add local "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}"
+        mc admin policy create local realfood-app /tmp/minio-app-policy.json
+        mc admin policy attach local realfood-app --user "$${MINIO_APP_ACCESS_KEY}"
+        mc admin user add local "$${MINIO_PUBLISH_ACCESS_KEY}" "$${MINIO_PUBLISH_SECRET_KEY}"
+        mc admin policy create local realfood-publisher /tmp/minio-publish-policy.json
+        mc admin policy attach local realfood-publisher --user "$${MINIO_PUBLISH_ACCESS_KEY}"
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY}
+      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY}
+      MINIO_PUBLISH_ACCESS_KEY: ${MINIO_PUBLISH_ACCESS_KEY}
+      MINIO_PUBLISH_SECRET_KEY: ${MINIO_PUBLISH_SECRET_KEY}
+    volumes:
+      - ./ops:/policies:ro
 
   migrate:
     build: *app-build
@@ -63,8 +82,8 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_REGION: us-east-1
       MINIO_BUCKET: ${MINIO_BUCKET}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ACCESS_KEY: ${MINIO_PUBLISH_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_PUBLISH_SECRET_KEY}
 
   app:
     build: *app-build
@@ -80,8 +99,8 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_REGION: us-east-1
       MINIO_BUCKET: ${MINIO_BUCKET}
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_APP_SECRET_KEY}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 20s

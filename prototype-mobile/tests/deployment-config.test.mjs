@@ -24,6 +24,24 @@ test("生产 Compose 默认使用固定镜像，并允许通过环境变量切�
   assert.doesNotMatch(compose, /^\s*image: minio\/(?:minio|mc):/m);
 });
 
+test("MinIO 运行时与发布器使用独立的最小权限身份", async () => {
+  const [compose, appPolicy, publishPolicy] = await Promise.all([
+    readFile(path.join(projectRoot, "compose.yaml"), "utf8"),
+    readFile(path.join(projectRoot, "ops", "minio-app-policy.json"), "utf8"),
+    readFile(path.join(projectRoot, "ops", "minio-publish-policy.json"), "utf8"),
+  ]);
+  assert.match(compose, /MINIO_ACCESS_KEY: \$\{MINIO_APP_ACCESS_KEY\}/);
+  assert.match(compose, /MINIO_ACCESS_KEY: \$\{MINIO_PUBLISH_ACCESS_KEY\}/);
+  assert.match(compose, /mc admin policy attach local realfood-app/);
+  assert.match(compose, /mc admin policy attach local realfood-publisher/);
+  assert.match(compose, /sed "s\/__BUCKET__\/\$\$\{MINIO_BUCKET\}\/g"/);
+  assert.deepEqual(JSON.parse(appPolicy).Statement[0].Action.sort(), ["s3:GetObject", "s3:ListBucket"]);
+  assert.deepEqual(JSON.parse(publishPolicy).Statement[0].Action.sort(), ["s3:GetObject", "s3:ListBucket", "s3:PutObject"]);
+  assert.doesNotMatch(appPolicy, /PutObject|DeleteObject/);
+  assert.doesNotMatch(publishPolicy, /DeleteObject/);
+  assert.match(appPolicy, /arn:aws:s3:::__BUCKET__/);
+});
+
 test("应用镜像的三个构建阶段共享可覆盖的 Node 基础镜像", async () => {
   const dockerfile = await readFile(path.join(projectRoot, "prototype-mobile", "Dockerfile"), "utf8");
   assert.doesNotMatch(

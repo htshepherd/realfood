@@ -15,8 +15,14 @@ function beneath(root, candidate) {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
+async function canonicalDirectoryRoot(root) {
+  const stat = await fs.lstat(root);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`授权根必须是真实目录：${root}`);
+  return fs.realpath(root);
+}
+
 export async function readRegularFile(root, filePath) {
-  const [canonicalRoot, stat] = await Promise.all([fs.realpath(root), fs.lstat(filePath)]);
+  const [canonicalRoot, stat] = await Promise.all([canonicalDirectoryRoot(root), fs.lstat(filePath)]);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`只允许普通文件：${filePath}`);
   if (stat.nlink > 1) throw new Error(`拒绝多重硬链接文件：${filePath}`);
   const canonicalFile = await fs.realpath(filePath);
@@ -33,7 +39,7 @@ export async function readRegularFile(root, filePath) {
 }
 
 export async function regularFiles(root, { skipTopLevel = [] } = {}) {
-  const canonicalRoot = await fs.realpath(root);
+  const canonicalRoot = await canonicalDirectoryRoot(root);
   const result = [];
   async function visit(directory, depth) {
     const entries = await fs.readdir(directory, { withFileTypes: true });
@@ -61,5 +67,11 @@ export async function regularFiles(root, { skipTopLevel = [] } = {}) {
 
 export function safeReportCode(value) {
   validatePathSegment(path.basename(value));
-  return String(value).replaceAll("`", "\\`");
+  const escaped = String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+  return `<code>${escaped}</code>`;
 }

@@ -3,15 +3,19 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { verifyManifestDirectory } from "./asset-publication.mjs";
+import { verifyAssetManifest, verifyManifestDirectory } from "./asset-publication.mjs";
+import { readRegularFile, validatePathSegment } from "../src/server/safe-files.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const release = JSON.parse(await fs.readFile(path.join(appRoot, "src", "data", "release.json"), "utf8"));
+verifyAssetManifest(release.manifest.assets);
 const assets = await verifyManifestDirectory(path.join(appRoot, "server-assets", "assets", release.manifest.version), release.manifest.assets.items ?? []);
 const searchRoot = path.join(appRoot, "server-assets", "pagefind", release.manifest.version);
 for (const file of release.manifest.search.files) {
-  const bytes = await fs.readFile(path.join(searchRoot, ...file.path.split("/")));
+  const parts = file.path.split("/");
+  parts.forEach(validatePathSegment);
+  const bytes = await readRegularFile(searchRoot, path.join(searchRoot, ...parts));
   if (bytes.length !== file.bytes || sha256(bytes) !== file.checksum) {
     throw new Error(`已发布 Pagefind 文件校验失败：${file.path}`);
   }
