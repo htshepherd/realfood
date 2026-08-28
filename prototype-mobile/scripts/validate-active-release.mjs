@@ -23,7 +23,13 @@ const payload = {
   schema: release.manifest.schema,
   searchEngine: release.manifest.search.engineVersion,
   searchDocumentSchema: release.manifest.search.documentSchema,
+  ...(release.manifest.search.queryExpansions ? { searchQueryExpansions: release.manifest.search.queryExpansions } : {}),
+  ...(release.manifest.search.termCounts ? { searchMetadata: {
+    termCounts: release.manifest.search.termCounts,
+    termCollisions: release.manifest.search.termCollisions,
+  } } : {}),
   objects: release.objects,
+  ...(release.explore ? { explore: release.explore } : {}),
   assetFingerprint: release.manifest.assets.checksum,
   searchFiles: release.manifest.search.files,
 };

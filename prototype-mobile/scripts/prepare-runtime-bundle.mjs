@@ -24,6 +24,26 @@ async function sha256File(filename) {
   return hash.digest("hex");
 }
 
+async function runtimeIsComplete(releasePath, assetsPath) {
+  if (!await exists(releasePath) || !await exists(assetsPath)) return false;
+  try {
+    const release = JSON.parse(await fs.readFile(releasePath, "utf8"));
+    const version = release?.manifest?.version;
+    const searchFiles = release?.manifest?.search?.files;
+    if (!version || !Array.isArray(searchFiles) || searchFiles.length === 0) return false;
+    const pagefindRoot = path.join(assetsPath, "pagefind", version);
+    if (!await exists(pagefindRoot)) return false;
+    for (const file of searchFiles) {
+      const parts = typeof file?.path === "string" ? file.path.split("/") : [];
+      if (parts.length === 0 || parts.some((part) => !part || part === "." || part === "..")) return false;
+      if (!await exists(path.join(pagefindRoot, ...parts))) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateRuntimeEntries(entries) {
   const paths = entries.split("\n").map((entry) => entry.trim()).filter(Boolean);
   const allowedDirectories = new Set([
@@ -65,7 +85,7 @@ async function removeMacMetadata(root) {
 export async function prepareRuntimeBundle({ repositoryRoot, bundlePath, expectedChecksum }) {
   const releasePath = path.join(repositoryRoot, ...releaseEntry.split("/"));
   const assetsPath = path.join(repositoryRoot, ...assetsPrefix.split("/").filter(Boolean));
-  if (await exists(releasePath) && await exists(assetsPath)) return { installed: false };
+  if (await runtimeIsComplete(releasePath, assetsPath)) return { installed: false };
 
   const bundle = bundlePath ? path.resolve(bundlePath) : "";
   if (!bundle || !await exists(bundle) || (await fs.stat(bundle)).size === 0) {
@@ -86,7 +106,7 @@ export async function prepareRuntimeBundle({ repositoryRoot, bundlePath, expecte
     removeMacMetadata(path.join(repositoryRoot, "prototype-mobile", "src", "data")),
     removeMacMetadata(assetsPath),
   ]);
-  if (!await exists(releasePath) || !await exists(assetsPath)) throw new Error("私有运行时包解压后仍缺少发布文件");
+  if (!await runtimeIsComplete(releasePath, assetsPath)) throw new Error("私有运行时包解压后仍缺少发布文件或对应的 Pagefind 索引");
   return { installed: true };
 }
 

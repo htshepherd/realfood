@@ -53,7 +53,13 @@ const finalPayload = {
   schema: release.manifest.schema,
   searchEngine: release.manifest.search.engineVersion,
   searchDocumentSchema: release.manifest.search.documentSchema,
+  searchQueryExpansions: release.manifest.search.queryExpansions,
+  searchMetadata: {
+    termCounts: release.manifest.search.termCounts,
+    termCollisions: release.manifest.search.termCollisions,
+  },
   objects: release.objects,
+  explore: release.explore,
   assetFingerprint: release.manifest.assets.checksum,
   searchFiles: release.manifest.search.files,
 };

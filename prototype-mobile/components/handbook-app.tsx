@@ -29,7 +29,7 @@ import ReactMarkdown from "react-markdown";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { clearOfflineData, readOffline, writeOffline } from "@/src/lib/offline-store";
 
-type SlotGroup = { title: string; markdown: string; text: string; itemCount: number; links: { title: string; href: string; slug: string }[]; summary: string; subgroups: SlotGroup[] };
+type SlotGroup = { title: string; markdown: string; text: string; itemCount: number; links: { title: string; href: string; slug: string }[]; summary: string; subgroups: SlotGroup[]; deficiencyRole?: "symptoms" | "risk" };
 type KnowledgeSlot = { key: string; label: string; sourceTitle: string; markdown: string; text: string; groups: SlotGroup[] };
 type FoodData = { relationCount: number; relations: { title: string; href: string }[]; classification?: KnowledgeSlot | null };
 type NavigationEntry = { id: string; slotKey: string; title: string; description: string; pageIntro: string; groupIndexes: number[] | null };
@@ -38,7 +38,7 @@ type KnowledgeItem = {
   surface: string;
   description: string; category: string; image: string; rawOrder: number | null; topicTags: string[]; tags: string[];
   classification?: { groupCode?: string; group?: string; subgroupCode?: string; subgroup?: string } | null; food?: FoodData | null;
-  slots: Record<string, KnowledgeSlot>; aliases: string[]; searchableText: string;
+  slots: Record<string, KnowledgeSlot>; aliases: string[]; searchTerms?: string[]; relatedQueries?: string[]; searchableText: string;
   navigation: NavigationEntry[];
   verificationMarks?: { name: string; description: string; image: string }[];
 };
@@ -46,7 +46,12 @@ type SearchFile = { path: string; bytes: number; checksum: string };
 type SearchHit = { id: string; excerpt: string; context?: string };
 type PagefindSubResult = { excerpt?: string; plain_excerpt?: string; title?: string; url?: string; weighted_locations?: { balanced_score?: number }[] };
 type PagefindData = { excerpt?: string; plain_excerpt?: string; meta?: { id?: string }; sub_results?: PagefindSubResult[] };
-type Release = { manifest: { schema: string; version: string; generatedAt: string; checksum: string; counts: { primary: number }; assets: { checksum: string }; search: { engine: string; engineVersion: string; documentSchema?: string; baseUrl: string; files?: SearchFile[] } }; objects: KnowledgeItem[] };
+type ExploreTopic = { name: string; count: number; objectIds: string[] };
+type ExploreGroup = { name: string; topics: ExploreTopic[] };
+type ExploreProjection = { defaultGroup: string; defaultTopic: string; groups: ExploreGroup[] };
+type SearchQueryExpansion = { query: string; evidenceTerm?: string; context?: string };
+type SearchTermCollision = { term: string; entries: { id: string; kind: string; value: string }[] };
+type Release = { manifest: { schema: string; version: string; generatedAt: string; checksum: string; counts: { primary: number }; assets: { checksum: string }; search: { engine: string; engineVersion: string; documentSchema?: string; baseUrl: string; files?: SearchFile[]; queryExpansions?: Record<string, SearchQueryExpansion[]>; termCounts?: { aliases: number; searchTerms: number; relatedQueries: number }; termCollisions?: SearchTermCollision[] } }; objects: KnowledgeItem[]; explore?: ExploreProjection };
 type Account = { id: string; username: string; displayName: string };
 type FavoriteOperation = { objectId: string; favorite: boolean; updatedAt: string };
 type View = "home" | "foods" | "nutrients" | "supplements" | "explore" | "verification" | "favorites";
@@ -56,25 +61,23 @@ const VIEW_LABELS: Record<View, string> = {
   explore: "探索", verification: "验证标志", favorites: "收藏",
 };
 
-const SEARCH_QUERY_VARIANTS: Record<string, string[]> = {
-  a: ["维生素 A"],
-  c: ["维生素 C"],
-  d: ["维生素 D"],
-  e: ["维生素 E"],
-  k: ["维生素 K"],
-  老人: ["老人", "老年人", "老年"],
-  女人: ["女人", "女性", "妇女"],
-  幽门螺旋杆菌: ["幽门螺旋杆菌", "幽门螺杆菌"],
-  抽筋: ["抽筋", "肌肉痉挛"],
-  伤口恢复慢: ["伤口恢复慢", "伤口愈合缓慢"],
-  注意力下降: ["注意力下降", "注意力不集中", "难以集中注意力"],
-  睡眠差: ["睡眠差", "睡眠质量", "入睡困难", "失眠"],
-  反复感染: ["反复感染", "频繁感染", "容易感染"],
+const LEGACY_SEARCH_QUERY_EXPANSIONS: Record<string, SearchQueryExpansion[]> = {
+  a: [{ query: "维生素 A" }], c: [{ query: "维生素 C" }], d: [{ query: "维生素 D" }],
+  e: [{ query: "维生素 E" }], k: [{ query: "维生素 K" }],
+  老人: [{ query: "老人" }, { query: "老年人" }, { query: "老年" }],
+  女人: [{ query: "女人" }, { query: "女性" }, { query: "妇女" }],
+  幽门螺旋杆菌: [{ query: "幽门螺旋杆菌" }, { query: "幽门螺杆菌" }],
+  抽筋: [{ query: "抽筋" }, { query: "肌肉痉挛" }],
+  伤口恢复慢: [{ query: "伤口恢复慢" }, { query: "伤口愈合缓慢" }],
+  注意力下降: [{ query: "注意力下降" }, { query: "注意力不集中" }, { query: "难以集中注意力" }],
+  睡眠差: [{ query: "睡眠差" }, { query: "睡眠质量" }, { query: "入睡困难" }, { query: "失眠" }],
+  反复感染: [{ query: "反复感染" }, { query: "频繁感染" }, { query: "容易感染" }],
 };
 
 const SEARCH_CONTEXT_LABELS: Record<string, string> = {
   effects: "作用与潜在益处",
   deficiency: "缺乏体征和症状",
+  safety: "风险、禁忌与相互作用",
 };
 
 const symbolBySlug: Record<string, string> = {
@@ -117,7 +120,18 @@ function api<T>(url: string, init?: RequestInit): Promise<T> {
 
 async function validRelease(release: Release) {
   if (release.objects.filter((item) => item.surface === "primary").length !== release.manifest.counts.primary) return false;
-  const source = new TextEncoder().encode(JSON.stringify({ schema: release.manifest.schema, searchEngine: release.manifest.search.engineVersion, searchDocumentSchema: release.manifest.search.documentSchema, objects: release.objects, assetFingerprint: release.manifest.assets.checksum, searchFiles: release.manifest.search.files ?? [] }));
+  const payload = {
+    schema: release.manifest.schema,
+    searchEngine: release.manifest.search.engineVersion,
+    searchDocumentSchema: release.manifest.search.documentSchema,
+    ...(release.manifest.search.queryExpansions ? { searchQueryExpansions: release.manifest.search.queryExpansions } : {}),
+    ...(release.manifest.search.termCounts ? { searchMetadata: { termCounts: release.manifest.search.termCounts, termCollisions: release.manifest.search.termCollisions } } : {}),
+    objects: release.objects,
+    ...(release.explore ? { explore: release.explore } : {}),
+    assetFingerprint: release.manifest.assets.checksum,
+    searchFiles: release.manifest.search.files ?? [],
+  };
+  const source = new TextEncoder().encode(JSON.stringify(payload));
   const digest = await crypto.subtle.digest("SHA-256", source);
   const checksum = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   return checksum === release.manifest.checksum;
@@ -147,6 +161,13 @@ function focusedPagefindExcerpt(html: string) {
     .trim();
 }
 
+function removePagefindEvidenceAnchors(html: string) {
+  return html
+    .replace(/(?:<mark\b[^>]*>)?ihealthevidence(?:bonedensity|krilloil)(?:<\/mark>)?/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function compactSearchText(value: string) {
   return decodeSearchEntities(value.replace(/<[^>]*>/g, ""))
     .normalize("NFKC")
@@ -154,9 +175,13 @@ function compactSearchText(value: string) {
     .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
-function searchQueryVariants(query: string) {
+function searchQueryExpansions(release: Release, query: string) {
   const normalized = query.normalize("NFKC").trim();
-  return [...new Set(SEARCH_QUERY_VARIANTS[normalized] ?? SEARCH_QUERY_VARIANTS[normalized.toLocaleLowerCase("zh-CN")] ?? [normalized])];
+  const queryExpansions = release.manifest.search.queryExpansions ?? LEGACY_SEARCH_QUERY_EXPANSIONS;
+  const configured = queryExpansions[normalized]
+    ?? queryExpansions[normalized.toLocaleLowerCase("zh-CN")]
+    ?? [{ query: normalized }];
+  return configured.filter((entry, index) => configured.findIndex((candidate) => candidate.query === entry.query && candidate.context === entry.context) === index);
 }
 
 function searchContext(result?: PagefindSubResult) {
@@ -165,25 +190,43 @@ function searchContext(result?: PagefindSubResult) {
   return SEARCH_CONTEXT_LABELS[slotKey];
 }
 
-function strongestPagefindSection(results: PagefindSubResult[], variant: string) {
-  const compactVariant = compactSearchText(variant);
+function strongestPagefindSection(results: PagefindSubResult[], evidenceTerm: string) {
+  const compactEvidenceTerm = compactSearchText(evidenceTerm);
   const score = (result: PagefindSubResult) => (result.weighted_locations ?? []).reduce((sum, location) => sum + (location.balanced_score ?? 0), 0);
-  const matching = results.filter((result) => compactSearchText(result.excerpt ?? result.plain_excerpt ?? "").includes(compactVariant));
+  const matching = results.filter((result) => compactSearchText(result.excerpt ?? result.plain_excerpt ?? "").includes(compactEvidenceTerm));
   return [...(matching.length ? matching : results)].sort((left, right) => score(right) - score(left))[0];
+}
+
+function highlightEvidenceTerm(html: string, evidenceTerm: string) {
+  if (!evidenceTerm || !html.includes(evidenceTerm) || html.includes(`<mark>${evidenceTerm}</mark>`)) return html;
+  return html.replace(evidenceTerm, `<mark>${evidenceTerm}</mark>`);
+}
+
+function releaseEvidenceMatch(item: KnowledgeItem | undefined, evidenceTerm: string) {
+  if (!item) return null;
+  for (const slotKey of ["effects", "deficiency", "safety"]) {
+    const line = item.slots[slotKey]?.markdown.split("\n")
+      .map((value) => value.replace(/\[([^\]]+)]\([^)]+\)/g, "$1").replace(/[*_`#>]/g, "").replace(/^\s*-\s*/, "").trim())
+      .find((value) => value.includes(evidenceTerm));
+    if (line) return { excerpt: highlightEvidenceTerm(line, evidenceTerm), context: SEARCH_CONTEXT_LABELS[slotKey] };
+  }
+  const metadata = [item.title, ...item.aliases, ...(item.searchTerms ?? []), ...(item.relatedQueries ?? [])].find((value) => value.includes(evidenceTerm));
+  return metadata ? { excerpt: highlightEvidenceTerm(metadata, evidenceTerm), context: undefined } : null;
 }
 
 async function searchRelease(release: Release, query: string, collection?: string) {
   const compactQuery = compactSearchText(query);
-  const variants = searchQueryVariants(query);
+  const expansions = searchQueryExpansions(release, query);
+  const variants = expansions.map((entry) => entry.query);
   const allowsSingleCharacter = variants.some((variant) => compactSearchText(variant) !== compactQuery)
     || release.objects.some((item) => [item.title, ...item.aliases].some((name) => compactSearchText(name) === compactQuery));
   if ([...compactQuery].length < 2 && !allowsSingleCharacter) return [];
 
   const pagefind = await import(/* webpackIgnore: true */ `${release.manifest.search.baseUrl}pagefind.js`);
   await pagefind.init();
-  const candidates = (await Promise.all(variants.map(async (variant) => {
-    const response = await pagefind.search(variant, collection ? { filters: { collection } } : {});
-    return response.results.map((result: { score: number; data: () => Promise<PagefindData> }) => ({ ...result, variant }));
+  const candidates = (await Promise.all(expansions.map(async (expansion) => {
+    const response = await pagefind.search(expansion.query, collection ? { filters: { collection } } : {});
+    return response.results.map((result: { score: number; data: () => Promise<PagefindData> }) => ({ ...result, variant: expansion.query, evidenceTerm: expansion.evidenceTerm ?? expansion.query, expansionContext: expansion.context }));
   }))).flat().sort((left, right) => right.score - left.score);
 
   const hits: SearchHit[] = [];
@@ -192,11 +235,17 @@ async function searchRelease(release: Release, query: string, collection?: strin
     const entry = await candidate.data();
     const id = entry.meta?.id;
     if (!id || accepted.has(id)) continue;
-    const strongestSection = strongestPagefindSection(entry.sub_results ?? [], candidate.variant);
-    const excerpt = focusedPagefindExcerpt(strongestSection?.excerpt ?? entry.excerpt ?? entry.plain_excerpt ?? "");
-    if (!compactSearchText(excerpt).includes(compactSearchText(candidate.variant))) continue;
+    const strongestSection = strongestPagefindSection(entry.sub_results ?? [], candidate.evidenceTerm);
+    let excerpt = removePagefindEvidenceAnchors(highlightEvidenceTerm(focusedPagefindExcerpt(strongestSection?.excerpt ?? entry.excerpt ?? entry.plain_excerpt ?? ""), candidate.evidenceTerm));
+    let evidenceContext: string | undefined;
+    if (!compactSearchText(excerpt).includes(compactSearchText(candidate.evidenceTerm))) {
+      const fallback = releaseEvidenceMatch(release.objects.find((item) => item.id === id), candidate.evidenceTerm);
+      if (!fallback) continue;
+      excerpt = fallback.excerpt;
+      evidenceContext = fallback.context;
+    }
     accepted.add(id);
-    hits.push({ id, excerpt, context: searchContext(strongestSection) });
+    hits.push({ id, excerpt, context: candidate.expansionContext ?? evidenceContext ?? searchContext(strongestSection) });
   }
   return hits;
 }
@@ -331,6 +380,41 @@ function CategoryPicker({ label, categories, active, setActive, allowAll = true,
             <span className="ml-3 grid size-5 shrink-0 place-items-center">{selected && <Check size={16}/>}</span>
           </button>;
         })}
+      </div>
+    </DialogContent>
+  </Dialog>;
+}
+
+function TopicGroupPicker({ explore, topic, setTopic }: { explore: ExploreProjection; topic: string; setTopic: (value: string) => void }) {
+  const selectedGroup = explore.groups.find((group) => group.topics.some((entry) => entry.name === topic)) ?? explore.groups[0];
+  const [open, setOpen] = useState(false);
+  const [groupName, setGroupName] = useState(selectedGroup?.name ?? explore.defaultGroup);
+  const activeGroup = explore.groups.find((group) => group.name === groupName) ?? selectedGroup;
+  const selectGroup = (group: ExploreGroup) => {
+    setGroupName(group.name);
+    if (group.topics[0]) setTopic(group.topics[0].name);
+  };
+  const selectTopic = (name: string) => { setTopic(name); setOpen(false); };
+  return <Dialog open={open} onOpenChange={setOpen}>
+    <button aria-label="选择探索主题" aria-expanded={open} onClick={() => setOpen(true)} className="focus-ring inline-flex max-w-full items-center gap-1.5 rounded-lg px-2 py-2 text-[15px] font-semibold">
+      <span className="truncate">{topic}</span><ChevronDown size={16} className={`shrink-0 text-[var(--muted)] transition-transform ${open ? "rotate-180" : ""}`}/>
+    </button>
+    <DialogContent aria-describedby={undefined} className="mx-auto flex max-h-[76dvh] max-w-[520px] flex-col rounded-t-[28px] border-x-0 border-b-0 px-0 pb-[max(18px,env(safe-area-inset-bottom))] sm:inset-x-0 sm:bottom-0 sm:top-auto sm:max-h-[76dvh] sm:w-full sm:rounded-t-[28px] sm:rounded-b-none">
+      <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-[var(--line-strong)]"/>
+      <div className="shrink-0 px-6 pb-4 pt-5"><DialogTitle className="text-[20px] font-semibold tracking-[-0.025em]">选择探索主题</DialogTitle><p className="mt-1 text-[13px] text-[var(--muted)]">先选分组，再选主题</p></div>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(138px,0.82fr)_1fr] border-t border-[var(--line)]">
+        <div data-explore-groups className="no-scrollbar min-h-0 overflow-y-auto overscroll-contain border-r border-[var(--line)] bg-[#f7f9f7] py-2">
+          {explore.groups.map((group) => {
+            const active = activeGroup?.name === group.name;
+            return <button data-explore-group aria-pressed={active} key={group.name} onClick={() => selectGroup(group)} className={`focus-ring flex h-12 w-full items-center whitespace-nowrap px-4 text-left text-[13px] font-medium ${active ? "bg-white text-[var(--text)]" : "text-[var(--muted)]"}`}><span>{group.name}</span></button>;
+          })}
+        </div>
+        <div data-explore-topics className="no-scrollbar min-h-0 overflow-y-auto overscroll-contain py-2">
+          {(activeGroup?.topics ?? []).map((entry) => {
+            const active = topic === entry.name;
+            return <button data-explore-topic aria-pressed={active} key={entry.name} onClick={() => selectTopic(entry.name)} className={`focus-ring flex min-h-12 w-full items-center gap-3 px-4 text-left ${active ? "bg-[#edf2ee]" : "bg-white"}`}><span className="min-w-0 flex-1 text-[14px] font-medium">{entry.name}</span><span className="font-mono text-[11px] text-[var(--muted-2)]">{entry.count}</span></button>;
+          })}
+        </div>
       </div>
     </DialogContent>
   </Dialog>;
@@ -500,20 +584,17 @@ function ExpandedGroup({ group, index, compact = false }: { group: SlotGroup; in
 
 type DeficiencyRole = "symptoms" | "risk";
 
-function deficiencyRole(group: SlotGroup): DeficiencyRole {
-  return /易缺|易患|原因|因素|群体|人群|更需要|消耗/.test(group.title) && !/体征|症状/.test(group.title) ? "risk" : "symptoms";
-}
-
 function DeficiencyContent({ groups }: { groups: SlotGroup[] }) {
-  const symptomGroups = groups.filter((group) => deficiencyRole(group) === "symptoms");
-  const riskGroups = groups.filter((group) => deficiencyRole(group) === "risk");
+  const symptomGroups = groups.filter((group) => group.deficiencyRole === "symptoms");
+  const riskGroups = groups.filter((group) => group.deficiencyRole === "risk");
+  const unclassifiedGroups = groups.filter((group) => !group.deficiencyRole);
   const tabs = [
     symptomGroups.length ? { key: "symptoms" as const, label: "缺乏体征和症状", groups: symptomGroups } : null,
     riskGroups.length ? { key: "risk" as const, label: "易缺乏人群", groups: riskGroups } : null,
   ].filter((tab): tab is DetailTab<DeficiencyRole> => Boolean(tab));
   const [active, setActive] = useState<DeficiencyRole>(tabs[0]?.key ?? "symptoms");
   const visibleGroups = tabs.find((tab) => tab.key === active)?.groups ?? tabs[0]?.groups ?? [];
-  return <div className="mt-8">{tabs.length > 1 && <DetailTabs tabs={tabs} active={active} setActive={setActive}/>}<div role={tabs.length > 1 ? "tabpanel" : undefined} className={tabs.length > 1 ? "mt-7" : ""}>{visibleGroups.map((group, index) => <ExpandedGroup key={`${group.title}-${index}`} group={group} index={index}/>)}</div></div>;
+  return <div className="mt-8">{tabs.length > 1 && <DetailTabs tabs={tabs} active={active} setActive={setActive}/>}<div role={tabs.length > 1 ? "tabpanel" : undefined} className={tabs.length > 1 ? "mt-7" : ""}>{visibleGroups.map((group, index) => <ExpandedGroup key={`${group.title}-${index}`} group={group} index={index}/>)}{unclassifiedGroups.map((group, index) => <ExpandedGroup key={`${group.title}-unclassified-${index}`} group={group} index={index + visibleGroups.length}/>)}</div></div>;
 }
 
 type SafetyRole = "overuse" | "drug" | "nutrient";
@@ -545,7 +626,8 @@ function SafetyContent({ groups }: { groups: SlotGroup[] }) {
 
 function detailPageIntro(page: ActiveDetailPage) {
   if (page.id === "deficiency") {
-    const roles = new Set(page.slot.groups.map(deficiencyRole));
+    const roles = new Set(page.slot.groups.map((group) => group.deficiencyRole).filter((role): role is DeficiencyRole => Boolean(role)));
+    if (roles.size === 0) return "了解缺乏与不足相关信息。";
     if (roles.size > 1) return "了解缺乏与不足的常见表现及相关人群。";
     return roles.has("symptoms") ? "了解缺乏与不足的常见表现。" : "了解可能导致缺乏与不足的相关因素。";
   }
@@ -595,11 +677,18 @@ function MarkdownBody({ markdown, compact = false }: { markdown: string; compact
   return <div className={`knowledge-markdown mt-5 text-[14px] leading-7 text-[var(--muted)] ${compact ? "knowledge-markdown--compact" : ""}`}><ReactMarkdown components={{ img: () => null, a: ({ children }) => <strong>{children}</strong> }}>{markdown}</ReactMarkdown></div>;
 }
 
-function Explore({ items, onMenu, openItem }: { items: KnowledgeItem[]; onMenu: () => void; openItem: (item: KnowledgeItem) => void }) {
+function Explore({ explore, items, onMenu, openItem }: { explore: ExploreProjection; items: KnowledgeItem[]; onMenu: () => void; openItem: (item: KnowledgeItem) => void }) {
+  const [topic, setTopic] = useState(explore.defaultTopic);
+  const related = items.filter((item) => item.topicTags.includes(topic));
+  return <main className="min-h-dvh"><TopBar onMenu={onMenu} center={<TopicGroupPicker explore={explore} topic={topic} setTopic={setTopic}/>}/><section className="px-6 pb-12 pt-10"><div data-explore-active-topic className="mx-auto grid size-24 place-items-center rounded-full bg-[#172a21] text-center text-[16px] font-semibold text-white">{topic}</div><div className="mx-auto h-12 w-px bg-[var(--line-strong)]"/><div className="grid grid-cols-2 gap-3">{related.map((item) => <button key={item.id} onClick={() => openItem(item)} className="rounded-[20px] border bg-[var(--surface-2)] p-4 text-left"><span className="text-[12px] text-[var(--muted)]">{item.collection}</span><strong className="mt-2 block text-[15px]">{item.title}</strong></button>)}</div></section></main>;
+}
+
+function LegacyExplore({ items, onMenu, openItem }: { items: KnowledgeItem[]; onMenu: () => void; openItem: (item: KnowledgeItem) => void }) {
   const topics = useMemo(() => [...new Set(items.flatMap((item) => item.topicTags))], [items]);
-  const [topic, setTopic] = useState(topics[0] ?? ""); const related = items.filter((item) => item.topicTags.includes(topic));
+  const [topic, setTopic] = useState(topics[0] ?? "");
+  const related = items.filter((item) => item.topicTags.includes(topic));
   const topicOptions = useMemo(() => topics.map((name) => ({ name, count: items.filter((item) => item.topicTags.includes(name)).length })), [items, topics]);
-  return <main className="min-h-dvh"><TopBar onMenu={onMenu} center={<CategoryPicker label="探索主题" selectorTitle="选择探索主题" categories={topicOptions} active={topic} setActive={setTopic} allowAll={false}/>}/><section className="px-6 pb-12 pt-10"><div className="mx-auto grid size-24 place-items-center rounded-full bg-[#172a21] text-center text-[16px] font-semibold text-white">{topic}</div><div className="mx-auto h-12 w-px bg-[var(--line-strong)]"/><div className="grid grid-cols-2 gap-3">{related.map((item) => <button key={item.id} onClick={() => openItem(item)} className="rounded-[20px] border bg-[var(--surface-2)] p-4 text-left"><span className="text-[12px] text-[var(--muted)]">{item.collection}</span><strong className="mt-2 block text-[15px]">{item.title}</strong></button>)}</div></section></main>;
+  return <main className="min-h-dvh"><TopBar onMenu={onMenu} center={<CategoryPicker label="探索主题" selectorTitle="选择探索主题" categories={topicOptions} active={topic} setActive={setTopic} allowAll={false}/>}/><section className="px-6 pb-12 pt-10"><div data-explore-active-topic className="mx-auto grid size-24 place-items-center rounded-full bg-[#172a21] text-center text-[16px] font-semibold text-white">{topic}</div><div className="mx-auto h-12 w-px bg-[var(--line-strong)]"/><div className="grid grid-cols-2 gap-3">{related.map((item) => <button key={item.id} onClick={() => openItem(item)} className="rounded-[20px] border bg-[var(--surface-2)] p-4 text-left"><span className="text-[12px] text-[var(--muted)]">{item.collection}</span><strong className="mt-2 block text-[15px]">{item.title}</strong></button>)}</div></section></main>;
 }
 
 function Verification({ onMenu, marks }: { onMenu: () => void; marks: { name: string; description: string; image: string }[] }) {
@@ -674,7 +763,9 @@ export function HandbookApp() {
   return <div className="mx-auto min-h-dvh w-full max-w-[520px] bg-white"><Drawer open={drawer} view={view} account={account} close={() => setDrawer(false)} navigate={setView} logout={logout}/>
     {view === "home" && <Home release={release} onMenu={() => setDrawer(true)} navigate={setView} search={search} setSearch={setSearch} openItem={setSelected}/>}
     {["foods", "nutrients", "supplements"].includes(view) && <CollectionPage release={release} view={view} items={collectionItems} onMenu={() => setDrawer(true)} openItem={setSelected}/>}
-    {view === "explore" && <Explore items={primary.filter((item) => item.topicTags.length)} onMenu={() => setDrawer(true)} openItem={setSelected}/>}
+    {view === "explore" && (release.explore
+      ? <Explore explore={release.explore} items={primary.filter((item) => item.topicTags.length)} onMenu={() => setDrawer(true)} openItem={setSelected}/>
+      : <LegacyExplore items={primary.filter((item) => item.topicTags.length)} onMenu={() => setDrawer(true)} openItem={setSelected}/>)}
     {view === "verification" && <Verification onMenu={() => setDrawer(true)} marks={release.objects.find((item) => item.title === "第三方验证标志")?.verificationMarks ?? []}/>}
     {view === "favorites" && <CollectionPage release={release} view={view} items={primary.filter((item) => favoriteIds.has(item.id))} onMenu={() => setDrawer(true)} openItem={setSelected}/>}
   </div>;

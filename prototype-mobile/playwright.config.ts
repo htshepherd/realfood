@@ -14,7 +14,7 @@ export default defineConfig({
   },
   projects: [{ name: "iPhone WebKit", use: { browserName: "webkit" } }],
   webServer: {
-    command: "IHEALTH_E2E_MODE=1 SESSION_SIGNING_SECRET=local-test-signing-secret-123456789 pnpm exec next dev --webpack -H 127.0.0.1",
+    command: "pnpm knowledge:build && IHEALTH_E2E_MODE=1 SESSION_SIGNING_SECRET=local-test-signing-secret-123456789 pnpm exec next dev --webpack -H 127.0.0.1",
     url: "http://127.0.0.1:3000",
     reuseExistingServer: true,
     timeout: 120_000,

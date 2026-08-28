@@ -4,6 +4,7 @@
 !.env.example
 knowledge/
 raw/
+private-deploy/
 node_modules/
 .next/
 prototype-mobile/.generated/

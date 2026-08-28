@@ -1,0 +1,21 @@
+[
+  { "query": "硝酸硫胺", "expectedId": "nutrients/vitamin-b1", "status": "pending-golden-review" },
+  { "query": "盐酸硫胺", "expectedId": "nutrients/vitamin-b1", "status": "pending-golden-review" },
+  { "query": "硫胺素焦磷酸酯", "expectedId": "nutrients/vitamin-b1", "status": "pending-golden-review" },
+  { "query": "烟酰胺核苷", "expectedId": "nutrients/vitamin-b3", "status": "pending-golden-review" },
+  { "query": "5-脱氧腺苷钴胺素", "expectedId": "nutrients/vitamin-b12", "status": "pending-golden-review" },
+  { "query": "生育三烯酚", "expectedId": "nutrients/vitamin-e", "status": "pending-golden-review" },
+  { "query": "甲基硒代半胱氨酸", "expectedId": "nutrients/selenium", "status": "pending-golden-review" },
+  { "query": "S-α-硫辛酸", "expectedId": "supplement-ingredients/alpha-lipoic-acid", "status": "pending-golden-review" },
+  { "query": "DL-α-硫辛酸", "expectedId": "supplement-ingredients/alpha-lipoic-acid", "status": "pending-golden-review" },
+  { "query": "硫辛酸钠", "expectedId": "supplement-ingredients/alpha-lipoic-acid", "status": "pending-golden-review" },
+  { "query": "二氢硫辛酸", "expectedId": "supplement-ingredients/alpha-lipoic-acid", "status": "pending-golden-review" },
+  { "query": "MAG-O3", "expectedId": "supplement-ingredients/fish-oil", "status": "pending-golden-review" },
+  { "query": "脂质体姜黄素", "expectedId": "supplement-ingredients/curcumin", "status": "pending-golden-review" },
+  { "query": "纳米姜黄素", "expectedId": "supplement-ingredients/curcumin", "status": "pending-golden-review" },
+  { "query": "脂质体槲皮素", "expectedId": "supplement-ingredients/quercetin", "status": "pending-golden-review" },
+  { "query": "乳化槲皮素", "expectedId": "supplement-ingredients/quercetin", "status": "pending-golden-review" },
+  { "query": "环糊精络合槲皮素", "expectedId": "supplement-ingredients/quercetin", "status": "pending-golden-review" },
+  { "query": "磷脂体槲皮素", "expectedId": "supplement-ingredients/quercetin", "status": "pending-golden-review" },
+  { "query": "甲钴胺", "expectedId": "nutrients/vitamin-b12", "status": "pending-terminology-review" }
+]

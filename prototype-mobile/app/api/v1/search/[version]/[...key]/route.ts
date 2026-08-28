@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { requireSession } from "@/src/server/auth";
+import { e2eMode } from "@/src/server/e2e-mode";
 import { release } from "@/src/server/release";
 
 const contentTypes: Record<string, string> = {
@@ -21,7 +22,9 @@ export async function GET(_request: Request, context: { params: Promise<{ versio
   const expected = release.manifest.search.files.find((file) => file.path === key);
   if (!expected) return new Response("搜索文件不存在", { status: 404 });
 
-  const root = path.join(process.cwd(), "server-assets", "pagefind", version);
+  const root = e2eMode()
+    ? path.join(process.cwd(), ".generated", "candidate", "pagefind")
+    : path.join(process.cwd(), "server-assets", "pagefind", version);
   const filePath = path.join(root, ...parts);
   if (!filePath.startsWith(`${root}${path.sep}`)) return new Response("无效路径", { status: 400 });
   try {

@@ -1,0 +1,75 @@
+[
+  {
+    "query": "口臭",
+    "expected": [{ "id": "nutrients/selenium", "excerpt": "口臭", "context": "风险、禁忌与相互作用" }],
+    "prohibited": ["supplement-ingredients/melatonin"]
+  },
+  {
+    "query": "幽门螺杆菌",
+    "expected": [{ "id": "nutrients/zinc", "excerpt": "幽门螺杆菌", "context": "作用与潜在益处" }],
+    "prohibited": []
+  },
+  {
+    "query": "幽门",
+    "expected": [{ "id": "nutrients/zinc", "excerpt": "幽门螺杆菌", "context": "作用与潜在益处" }],
+    "prohibited": []
+  },
+  {
+    "query": "幽门螺旋杆菌",
+    "expected": [{ "id": "nutrients/zinc", "excerpt": "幽门螺杆菌", "context": "作用与潜在益处" }],
+    "prohibited": []
+  },
+  {
+    "query": "维生素 D3",
+    "expected": [{ "id": "nutrients/vitamin-d", "excerpt": "维生素 D3", "context": null }],
+    "ranking": ["nutrients/vitamin-d"],
+    "prohibited": ["nutrients/vitamin-a"]
+  },
+  {
+    "query": "L-抗坏血酸",
+    "expected": [{ "id": "nutrients/vitamin-c", "excerpt": "L-抗坏血酸", "context": null }],
+    "ranking": ["nutrients/vitamin-c"],
+    "prohibited": []
+  },
+  {
+    "query": "甲基钴胺素",
+    "expected": [{ "id": "nutrients/vitamin-b12", "excerpt": "甲基钴胺素", "context": null }],
+    "prohibited": ["nutrients/vitamin-b1"]
+  },
+  {
+    "query": "海洋镁",
+    "expected": [{ "id": "nutrients/magnesium", "excerpt": "海洋镁", "context": null }],
+    "prohibited": ["nutrients/calcium"]
+  },
+  {
+    "query": "磷虾油",
+    "expected": [{ "id": "supplement-ingredients/fish-oil", "excerpt": "磷虾油", "context": null }],
+    "ranking": ["supplement-ingredients/fish-oil"],
+    "prohibited": ["supplement-ingredients/black-seed-oil"]
+  },
+  {
+    "query": "骨密度",
+    "expected": [
+      { "id": "nutrients/manganese", "excerpt": "骨密度", "context": null },
+      { "id": "nutrients/magnesium", "excerpt": "骨密度", "context": "作用与潜在益处" }
+    ],
+    "ranking": ["nutrients/manganese", "nutrients/magnesium"],
+    "prohibited": []
+  },
+  {
+    "query": "甲状腺",
+    "expected": [
+      { "id": "nutrients/iodine", "excerpt": "甲状腺", "context": "缺乏体征和症状" },
+      { "id": "nutrients/selenium", "excerpt": "甲状腺", "context": "作用与潜在益处" }
+    ],
+    "prohibited": []
+  },
+  {
+    "query": "ALA",
+    "expected": [
+      { "id": "supplement-ingredients/alpha-lipoic-acid", "excerpt": "Alpha Lipoic Acid", "context": "ALA：Alpha Lipoic Acid（α-硫辛酸）" },
+      { "id": "supplement-ingredients/fish-oil", "excerpt": "α-亚麻酸", "context": "ALA：α-亚麻酸（相关知识）" }
+    ],
+    "prohibited": []
+  }
+]

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import goldenQueries from "../tests/search-golden-queries.json";
+
 async function login(page: Page) {
   await page.goto("/");
   await page.getByPlaceholder("账号").fill("admin");
@@ -50,7 +52,11 @@ test("首页搜索展示带上下文的高亮原文", async ({ page }) => {
   await expect(taurine.locator("[data-search-excerpt]")).toContainText("心脏与血管：可自然降低高血压患者的血压");
   await expect(taurine.locator("mark")).toContainText("高血压");
 
-  await expect(page.getByRole("button").filter({ hasText: "褪黑激素" })).toHaveCount(0);
+  const melatonin = page.getByRole("button").filter({ hasText: "褪黑激素" }).first();
+  await expect(melatonin).toBeVisible();
+  await expect(melatonin.locator("[data-search-context]")).toHaveText("风险、禁忌与相互作用");
+  const rankedIds = await page.locator("[data-search-result]").evaluateAll((results) => results.map((result) => result.getAttribute("data-search-result")));
+  expect(rankedIds.indexOf("nutrients/taurine")).toBeLessThan(rankedIds.indexOf("supplement-ingredients/melatonin"));
   await taurine.click();
   await expect(page.getByRole("heading", { name: "牛磺酸", exact: true }).last()).toBeVisible();
 });
@@ -76,6 +82,37 @@ test("首页健康问题搜索过滤分词噪声并支持常用人群词", async
   await expect(page.getByRole("button").filter({ hasText: "维生素 A" }).first()).toBeVisible();
 });
 
+test("首页搜索通过版本化黄金查询矩阵", async ({ page }) => {
+  await login(page);
+  const search = page.getByPlaceholder("搜索食物、营养或健康问题");
+
+  for (const scenario of goldenQueries) {
+    await search.fill(scenario.query);
+    for (const expected of scenario.expected) {
+      const result = page.locator(`[data-search-result="${expected.id}"]`);
+      await expect(result, `${scenario.query} 应召回 ${expected.id}`).toBeVisible();
+      await expect(result.locator("[data-search-excerpt]")).toContainText(expected.excerpt);
+      if (expected.context) await expect(result.locator("[data-search-context]")).toHaveText(expected.context);
+      else await expect(result.locator("[data-search-context]")).toHaveCount(0);
+    }
+    for (const prohibited of scenario.prohibited) {
+      await expect(page.locator(`[data-search-result="${prohibited}"]`)).toHaveCount(0);
+    }
+    if (scenario.ranking) {
+      const rankedIds = await page.locator("[data-search-result]").evaluateAll((results) => results.map((result) => result.getAttribute("data-search-result")));
+      if (scenario.ranking.length === 1) expect(rankedIds[0], `${scenario.query} 的精确名称或具体形态应排第一`).toBe(scenario.ranking[0]);
+      else {
+        const positions = scenario.ranking.map((id) => rankedIds.indexOf(id));
+        expect(positions.every((position) => position >= 0), `${scenario.query} 的排序对象都应出现`).toBe(true);
+        expect(positions, `${scenario.query} 排序应遵循人工词层级`).toEqual([...positions].sort((left, right) => left - right));
+      }
+    }
+  }
+
+  await search.fill("欧米伽3");
+  await expect(page.locator('[data-search-result="supplement-ingredients/fish-oil"]')).toBeVisible();
+});
+
 test("维生素 D 保留完整的获取与利用内容", async ({ page }) => {
   await login(page);
   await navigate(page, "营养素");
@@ -89,25 +126,102 @@ test("维生素 D 保留完整的获取与利用内容", async ({ page }) => {
   }
 });
 
-test("探索主题选择器可滚动到最后一个分类", async ({ page }) => {
+test("维生素 C 的缺乏相关因素不会显示为缺乏症状", async ({ page }) => {
+  await login(page);
+  await navigate(page, "营养素");
+  await page.locator("article").filter({ has: page.getByRole("heading", { name: "维生素 C", exact: true }) }).getByRole("button").click();
+  await page.getByRole("button", { name: /维生素 C 缺乏与不足/ }).click();
+  await expect(page.getByText("了解可能导致缺乏与不足的相关因素。", { exact: true })).toBeVisible();
+  await expect(page.getByText("缺乏体征和症状", { exact: true })).toHaveCount(0);
+  for (const title of ["饮食与生活方式", "药物影响", "疾病与恢复阶段"]) {
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  }
+});
+
+test("探索主题按分组联动并保持单行可达", async ({ page }) => {
   await login(page);
   await navigate(page, "探索");
-  await page.getByRole("button", { name: "选择探索主题" }).click();
+  const expectedGroups = [
+    { name: "细胞功能与代谢", topics: ["血糖", "血脂", "能量", "DNA", "抗氧化", "细胞保护", "营养协同", "造血"] },
+    { name: "心脑与神经", topics: ["心脏", "血管", "大脑", "神经", "情绪", "睡眠"] },
+    { name: "免疫与呼吸", topics: ["免疫", "炎症", "感染", "呼吸道", "过敏"] },
+    { name: "消化与脏器", topics: ["消化", "肝脏", "肾脏"] },
+    { name: "骨骼与运动", topics: ["骨骼", "牙齿", "肌肉", "关节", "运动", "身体恢复", "疼痛"] },
+    { name: "皮肤与感官", topics: ["皮肤", "头发", "眼睛", "伤口"] },
+    { name: "生殖与激素", topics: ["生殖", "激素"] },
+  ];
+  const topicResponse = await page.request.get("/api/v1/topics");
+  expect(topicResponse.status()).toBe(200);
+  const topicProjection = await topicResponse.json();
+  expect({ defaultGroup: topicProjection.defaultGroup, defaultTopic: topicProjection.defaultTopic }).toEqual({ defaultGroup: "细胞功能与代谢", defaultTopic: "血糖" });
+  expect(topicProjection.groups.map((group: { name: string; topics: { name: string }[] }) => ({ name: group.name, topics: group.topics.map((topic) => topic.name) }))).toEqual(expectedGroups);
+  const picker = page.getByRole("button", { name: "选择探索主题" });
+  await expect(picker).toContainText("血糖");
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const backgroundScroll = await page.evaluate(() => window.scrollY);
+  expect(backgroundScroll).toBeGreaterThan(0);
+  await picker.click();
   const dialog = page.getByRole("dialog");
-  const options = dialog.locator("[data-category-options]");
-  const lastOption = dialog.locator("[data-category-option]").last();
-  await expect(lastOption).toBeAttached();
-  await lastOption.scrollIntoViewIfNeeded();
-  const layout = await options.evaluate((container) => {
-    const last = container.querySelector<HTMLElement>("[data-category-option]:last-child");
-    const containerRect = container.getBoundingClientRect();
-    const lastRect = last?.getBoundingClientRect();
+  const backgroundLocked = await page.evaluate(() => document.body.hasAttribute("data-scroll-locked") || getComputedStyle(document.body).overflow === "hidden");
+  expect(backgroundLocked).toBe(true);
+  const groups = dialog.locator("[data-explore-group]");
+  await expect(groups).toHaveCount(7);
+  expect(await groups.locator("span").allTextContents()).toEqual(expectedGroups.map((group) => group.name));
+  await expect(groups.first()).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.locator("[data-explore-topic]").first()).toContainText("血糖");
+  const projectedTopics: string[] = [];
+  for (let index = 0; index < expectedGroups.length; index += 1) {
+    await groups.nth(index).scrollIntoViewIfNeeded();
+    await groups.nth(index).click();
+    const topics = dialog.locator("[data-explore-topic]");
+    await expect(topics).toHaveCount(expectedGroups[index].topics.length);
+    const topicNames = await topics.locator("span:first-child").allTextContents();
+    expect(topicNames).toEqual(expectedGroups[index].topics);
+    expect((await topics.locator("span:last-child").allTextContents()).every((count) => Number(count) > 0)).toBe(true);
+    projectedTopics.push(...topicNames);
+    await expect(topics.first()).toHaveAttribute("aria-pressed", "true");
+    if (index === 0) {
+      const lastTopic = topics.last();
+      await lastTopic.scrollIntoViewIfNeeded();
+      const rightColumnLayout = await lastTopic.evaluate((last) => {
+        const column = last.closest("[data-explore-topics]")!;
+        const columnBounds = column.getBoundingClientRect();
+        const topicBounds = last.getBoundingClientRect();
+        return topicBounds.top >= columnBounds.top && topicBounds.bottom <= columnBounds.bottom;
+      });
+      expect(rightColumnLayout).toBe(true);
+      await expect(lastTopic).toContainText("造血");
+    }
+  }
+  expect(projectedTopics).toHaveLength(35);
+  expect(new Set(projectedTopics).size).toBe(35);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("[data-explore-topic]")).toHaveCount(2);
+  await expect(dialog.locator("[data-explore-topic]").first()).toHaveAttribute("aria-pressed", "true");
+  const groupLayout = await groups.evaluateAll((buttons) => buttons.map((button) => ({
+    oneLine: button.scrollHeight === button.clientHeight,
+    notClipped: button.scrollWidth <= button.clientWidth,
+  })));
+  expect(groupLayout.every((entry) => entry.oneLine && entry.notClipped)).toBe(true);
+  const dialogLayout = await dialog.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const left = element.querySelector("[data-explore-groups]")!.getBoundingClientRect();
+    const right = element.querySelector("[data-explore-topics]")!.getBoundingClientRect();
     return {
-      scrollable: container.scrollHeight > container.clientHeight,
-      lastInsideViewport: Boolean(lastRect && lastRect.bottom <= containerRect.bottom + 1),
+      inside: left.left >= bounds.left && right.right <= bounds.right && left.top >= bounds.top && right.bottom <= bounds.bottom,
+      linkedColumns: left.right <= right.left,
     };
   });
-  expect(layout).toEqual({ scrollable: true, lastInsideViewport: true });
+  expect(dialogLayout).toEqual({ inside: true, linkedColumns: true });
+  const selectedTopicCount = Number(await dialog.locator("[data-explore-topic]").filter({ hasText: "激素" }).locator("span:last-child").textContent());
+  await dialog.locator("[data-explore-topic]").filter({ hasText: "激素" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("[data-explore-active-topic]")).toHaveText("激素");
+  const relatedCards = page.locator("section .grid-cols-2 > button");
+  await expect(relatedCards).toHaveCount(selectedTopicCount);
+  const relatedTitle = await relatedCards.first().locator("strong").textContent();
+  await relatedCards.first().click();
+  await expect(page.getByRole("heading", { name: relatedTitle ?? "", exact: true }).last()).toBeVisible();
 });
 
 test("三类列表、单标签探索和账号收藏可操作", async ({ page }) => {
@@ -199,25 +313,13 @@ test("三类列表、单标签探索和账号收藏可操作", async ({ page }) 
   await navigate(page, "探索");
   const exploreTopic = page.getByRole("button", { name: "选择探索主题" });
   await expect(exploreTopic).toBeVisible();
+  await expect(exploreTopic).toContainText("血糖");
   await exploreTopic.click();
   const exploreDialog = page.getByRole("dialog");
   await expect(exploreDialog.getByText("选择探索主题", { exact: true })).toBeVisible();
-  const exploreOptions = exploreDialog.locator("[data-category-options]");
-  const lastExploreOption = exploreDialog.locator("[data-category-option]").last();
-  await expect(lastExploreOption).toBeAttached();
-  await lastExploreOption.scrollIntoViewIfNeeded();
-  const categoryLayout = await exploreOptions.evaluate((container) => {
-    const last = container.querySelector<HTMLElement>("[data-category-option]:last-child");
-    const containerRect = container.getBoundingClientRect();
-    const lastRect = last?.getBoundingClientRect();
-    return {
-      scrollable: container.scrollHeight > container.clientHeight,
-      lastInsideViewport: Boolean(lastRect && lastRect.bottom <= containerRect.bottom + 1),
-    };
-  });
-  expect(categoryLayout).toEqual({ scrollable: true, lastInsideViewport: true });
-  await exploreDialog.locator("[data-category-option]").nth(1).click();
-  await expect(page.locator("section .rounded-full").first()).toBeVisible();
+  await exploreDialog.getByRole("button", { name: /免疫与呼吸/ }).click();
+  await exploreDialog.getByRole("button", { name: /过敏/ }).click();
+  await expect(page.locator("[data-explore-active-topic]")).toHaveText("过敏");
   await navigate(page, "验证标志");
   await expect(page.getByText("美国国家卫生基金会", { exact: true })).toBeVisible();
   const categories = await page.request.get("/api/v1/categories");
@@ -228,22 +330,48 @@ test("三类列表、单标签探索和账号收藏可操作", async ({ page }) 
 });
 
 test("首轮同步后离线仍可打开已缓存知识", async ({ page, context }) => {
+  const searchSnapshot = () => page.locator("[data-search-result]").evaluateAll((results) => results.map((result) => ({
+    id: result.getAttribute("data-search-result"),
+    context: result.querySelector("[data-search-context]")?.textContent ?? null,
+    excerpt: result.querySelector("[data-search-excerpt]")?.textContent ?? "",
+  })));
+  const exploreSnapshot = async () => {
+    await navigate(page, "探索");
+    const activeTopic = await page.locator("[data-explore-active-topic]").textContent();
+    await page.getByRole("button", { name: "选择探索主题" }).click();
+    const dialog = page.getByRole("dialog");
+    const groups = dialog.locator("[data-explore-group]");
+    const groupNames = await groups.locator("span").allTextContents();
+    const topics: string[][] = [];
+    for (let index = 0; index < await groups.count(); index += 1) {
+      await groups.nth(index).click();
+      topics.push(await dialog.locator("[data-explore-topic] span:first-child").allTextContents());
+    }
+    await page.keyboard.press("Escape");
+    return { activeTopic, groupNames, topics };
+  };
   await login(page);
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.reload();
   await expect(page.getByPlaceholder("搜索食物、营养或健康问题")).toBeVisible();
   await page.getByPlaceholder("搜索食物、营养或健康问题").fill("L-抗坏血酸");
   await expect(page.getByRole("button").filter({ hasText: "维生素 C" }).first()).toBeVisible();
+  const onlineExplore = await exploreSnapshot();
+  expect(onlineExplore.activeTopic).toBe("血糖");
+  await navigate(page, "首页");
+  await page.getByPlaceholder("搜索食物、营养或健康问题").fill("ALA");
+  await expect(page.locator('[data-search-result="supplement-ingredients/fish-oil"]')).toBeVisible();
+  const onlineResults = await searchSnapshot();
   await context.setOffline(true);
   // Playwright WebKit reports an internal navigation error when an offline reload is
   // fulfilled by a service worker, so trigger the real browser reload and assert the resulting UI.
   await page.evaluate(() => window.location.reload()).catch(() => undefined);
   await page.waitForTimeout(800);
   await expect(page.getByPlaceholder("搜索食物、营养或健康问题")).toBeVisible();
-  await page.getByPlaceholder("搜索食物、营养或健康问题").fill("L-抗坏血酸");
-  await expect(page.getByRole("button").filter({ hasText: "维生素 C" }).first()).toBeVisible();
-  await page.getByRole("button", { name: "打开菜单" }).click();
-  await expect(page.getByRole("button", { name: "营养素", exact: true })).toBeVisible();
+  await page.getByPlaceholder("搜索食物、营养或健康问题").fill("ALA");
+  await expect(page.locator('[data-search-result="supplement-ingredients/fish-oil"]')).toBeVisible();
+  expect(await searchSnapshot()).toEqual(onlineResults);
+  expect(await exploreSnapshot()).toEqual(onlineExplore);
 });
 
 test("退出会清除本机私有数据", async ({ page }) => {

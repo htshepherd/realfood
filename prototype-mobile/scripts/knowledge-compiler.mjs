@@ -52,18 +52,80 @@ const GROUP_SUMMARIES = {
   "鱼油/皮肤、骨骼与成长": "皮肤、骨骼与婴儿视力发育",
   "鱼油/呼吸、情绪与日常状态": "过敏、情绪、睡眠与经期不适",
 };
+const DEFICIENCY_RISK_GROUP_TITLES = new Set([
+  "易缺乏钙群体", "易患胆碱缺乏症的人群", "易缺乏铜的原因及群体", "易缺碘群体",
+  "低钾血症的原因", "易缺乏镁的群体", "易缺乏硒的群体", "低钠血症的原因",
+  "导致牛磺酸缺乏的原因", "易缺乏维生素 A 群体", "易缺乏维生素 B12 群体",
+  "易缺乏维生素 B9 群体", "饮食与生活方式", "药物影响", "疾病与恢复阶段",
+  "易缺乏维生素 E 群体", "易缺乏锌的群体", "哪些疾病会消耗辅酶 Q10？",
+  "哪些人更需要辅酶 Q10？", "易缺乏肌醇群体", "干扰褪黑激素分泌的因素",
+]);
+const DEFICIENCY_SYMPTOM_GROUP_TITLES = new Set([
+  "钙缺乏体征和症状", "胆碱缺乏症", "铜缺乏症体征和症状",
+  "碘缺乏及相关甲状腺疾病体征和症状", "新生儿碘缺乏症状", "与碘缺乏相关的疾病",
+  "铁缺乏症体征和症状", "镁缺乏体征和症状", "低钾血症体征和症状",
+  "硒缺乏体征和症状", "低钠血症体征和症状", "牛磺酸缺乏的体征和症状",
+  "维生素 A 缺乏体征和症状", "维生素 B1 缺乏体征和症状",
+  "维生素 B12 缺乏体征和症状", "维生素 B2 缺乏体征和症状",
+  "维生素 B3 缺乏体征和症状", "维生素 B6 缺乏体征和症状", "维生素 B7 缺乏症",
+  "维生素 B9 缺乏体征和症状", "维生素 D 缺乏体征和症状",
+  "维生素 E 缺乏体征和症状", "维生素 K 缺乏体征和症状", "锌缺乏体征和症状",
+  "褪黑激素不足症状",
+]);
 
 // Authoring-only sections are intentionally omitted. Listing them explicitly
 // ensures a newly introduced heading fails the build instead of disappearing.
 const AUTHORING_ONLY_HEADINGS = new Set(["重点提示", "资料状态"]);
 const COMPILER_SCHEMA = "ihealth-release@2";
 const SEARCH_ENGINE_VERSION = "pagefind@1.5.2";
-const SEARCH_DOCUMENT_SCHEMA = "focused-effects-deficiency@1";
-const SEARCH_CONTENT_SLOT_KEYS = ["effects", "deficiency"];
+const SEARCH_DOCUMENT_SCHEMA = "focused-effects-deficiency-safety@2";
+const SEARCH_CONTENT_SLOT_KEYS = ["effects", "deficiency", "safety"];
 const SEARCH_CONTENT_COLLECTIONS = new Set(["营养素", "补充剂"]);
 const SEARCH_SLOT_LABELS = {
   effects: "作用与潜在益处",
   deficiency: "缺乏体征和症状",
+  safety: "风险、禁忌与相互作用",
+};
+const EXPLORE_GROUPS = [
+  { name: "细胞功能与代谢", topics: ["血糖", "血脂", "能量", "DNA", "抗氧化", "细胞保护", "营养协同", "造血"] },
+  { name: "心脑与神经", topics: ["心脏", "血管", "大脑", "神经", "情绪", "睡眠"] },
+  { name: "免疫与呼吸", topics: ["免疫", "炎症", "感染", "呼吸道", "过敏"] },
+  { name: "消化与脏器", topics: ["消化", "肝脏", "肾脏"] },
+  { name: "骨骼与运动", topics: ["骨骼", "牙齿", "肌肉", "关节", "运动", "身体恢复", "疼痛"] },
+  { name: "皮肤与感官", topics: ["皮肤", "头发", "眼睛", "伤口"] },
+  { name: "生殖与激素", topics: ["生殖", "激素"] },
+];
+// These opaque tokens are indexed beside the exact evidence at that evidence's
+// own Pagefind weight. They work around Chinese tokenization gaps without
+// borrowing the score of an unrelated searchable word.
+const PAGEFIND_EVIDENCE_ANCHORS = {
+  骨密度: "ihealthevidencebonedensity",
+  磷虾油: "ihealthevidencekrilloil",
+};
+const SEARCH_QUERY_EXPANSIONS = {
+  a: [{ query: "维生素 A" }],
+  c: [{ query: "维生素 C" }],
+  d: [{ query: "维生素 D" }],
+  e: [{ query: "维生素 E" }],
+  k: [{ query: "维生素 K" }],
+  老人: [{ query: "老人" }, { query: "老年人" }, { query: "老年" }],
+  女人: [{ query: "女人" }, { query: "女性" }, { query: "妇女" }],
+  幽门: [{ query: "根除", evidenceTerm: "幽门螺杆菌" }],
+  幽门螺杆菌: [{ query: "根除", evidenceTerm: "幽门螺杆菌" }],
+  幽门螺旋杆菌: [{ query: "根除", evidenceTerm: "幽门螺杆菌" }],
+  抽筋: [{ query: "抽筋" }, { query: "肌肉痉挛" }],
+  伤口恢复慢: [{ query: "伤口恢复慢" }, { query: "伤口愈合缓慢" }],
+  注意力下降: [{ query: "注意力下降" }, { query: "注意力不集中" }, { query: "难以集中注意力" }],
+  睡眠差: [{ query: "睡眠差" }, { query: "睡眠质量" }, { query: "入睡困难" }, { query: "失眠" }],
+  反复感染: [{ query: "反复感染" }, { query: "频繁感染" }, { query: "容易感染" }],
+  骨密度: [{ query: PAGEFIND_EVIDENCE_ANCHORS.骨密度, evidenceTerm: "骨密度" }],
+  欧米伽3: [{ query: "Omega-3" }, { query: "ω-3" }],
+  奥米伽3: [{ query: "Omega-3" }, { query: "ω-3" }],
+  磷虾油: [{ query: PAGEFIND_EVIDENCE_ANCHORS.磷虾油, evidenceTerm: "磷虾油" }],
+  ala: [
+    { query: "Alpha Lipoic Acid", context: "ALA：Alpha Lipoic Acid（α-硫辛酸）" },
+    { query: "α-亚麻酸", context: "ALA：α-亚麻酸（相关知识）" },
+  ],
 };
 
 const normalizeName = (value) => value
@@ -125,6 +187,7 @@ function parseFrontmatter(markdown, sourceLabel) {
       tags: parseInlineArray(scalar(frontmatter, "tags")),
       topicTags: parseInlineArray(scalar(frontmatter, "topic_tags")),
       searchTerms: parseInlineArray(scalar(frontmatter, "search_terms")),
+      relatedQueries: parseInlineArray(scalar(frontmatter, "related_queries")),
       giftGroup: nestedScalar(frontmatter, "group"),
       giftGroupCode: nestedScalar(frontmatter, "group_code"),
       giftSubgroup: nestedScalar(frontmatter, "subgroup"),
@@ -319,6 +382,22 @@ function refineVitaminCPresentation(slots) {
   }
 }
 
+function projectDeficiencyRoles(slot, objectTitle) {
+  if (!slot) return slot;
+  return {
+    ...slot,
+    groups: slot.groups.map((group) => {
+      const deficiencyRole = DEFICIENCY_RISK_GROUP_TITLES.has(group.title)
+        ? "risk"
+        : DEFICIENCY_SYMPTOM_GROUP_TITLES.has(group.title)
+          ? "symptoms"
+          : null;
+      if (!deficiencyRole) throw new Error(`缺乏分组缺少语义角色：${objectTitle} -> ${group.title}`);
+      return { ...group, deficiencyRole };
+    }),
+  };
+}
+
 // The Markdown headings preserve the author's source structure. The consumer
 // contract below applies the product decisions without rewriting those files:
 // Basic facts live in overview and serving advice lives with dosage. Most
@@ -353,6 +432,7 @@ function normalizeConsumerSlots(sourceSlots, title) {
   if (title !== "维生素 D") delete slots.acquisition;
   delete slots.special;
   if (title === "维生素 C") refineVitaminCPresentation(slots);
+  slots.deficiency = projectDeficiencyRoles(slots.deficiency, title);
   return Object.fromEntries(SLOT_ORDER.filter((key) => slots[key]?.markdown?.trim()).map((key) => [key, slots[key]]));
 }
 
@@ -604,10 +684,26 @@ function renderSearchSections(item) {
         ? `<h3 id="${slotKey}--${headingIndex++}">${escapeHtml(segment.title)}</h3>\n`
         : "";
       previousTitle = segment.title;
-      return `${heading}<p>${escapeHtml(segment.title)}：${escapeHtml(segment.text)}</p>`;
+      const evidence = `${segment.title}：${segment.text}`;
+      const anchors = searchEvidenceAnchors(evidence);
+      return `${heading}<p>${escapeHtml(evidence)}${anchors ? ` ${anchors}` : ""}</p>`;
     }).join("\n");
-    return [`<section>\n<h2 id="${slotKey}">${escapeHtml(SEARCH_SLOT_LABELS[slotKey])}</h2>\n${content}\n</section>`];
+    const weight = slotKey === "safety" ? ` data-pagefind-weight="0.5"` : "";
+    return [`<section${weight}>\n<h2 id="${slotKey}">${escapeHtml(SEARCH_SLOT_LABELS[slotKey])}</h2>\n${content}\n</section>`];
   }).join("\n");
+}
+
+function searchEvidenceAnchors(value) {
+  return Object.entries(PAGEFIND_EVIDENCE_ANCHORS)
+    .filter(([term]) => value.includes(term))
+    .map(([, anchor]) => anchor)
+    .join(" ");
+}
+
+function weightedSearchMetadata(values) {
+  const evidence = values.join(" ");
+  const anchors = searchEvidenceAnchors(evidence);
+  return `${escapeHtml(evidence)}${anchors ? ` ${anchors}` : ""}`;
 }
 
 async function writeSearchCorpus(objects, outputRoot) {
@@ -623,11 +719,76 @@ async function writeSearchCorpus(objects, outputRoot) {
 <span data-pagefind-ignore data-pagefind-filter="collection:${escapeHtml(item.collection)}"></span>
 <span data-pagefind-ignore data-pagefind-filter="category:${escapeHtml(item.category)}"></span>
 <h1 data-pagefind-weight="10">${escapeHtml(item.title)}</h1>
-<p data-pagefind-weight="8">${escapeHtml([...item.aliases, ...item.searchTerms].join(" "))}</p>
+<p data-pagefind-weight="8">${weightedSearchMetadata(item.aliases)}</p>
+<p data-pagefind-weight="6">${weightedSearchMetadata(item.searchTerms)}</p>
+<p data-pagefind-weight="2">${weightedSearchMetadata(item.relatedQueries)}</p>
 ${searchSections}
 </body></html>\n`;
     await fs.writeFile(path.join(searchRoot, `${item.id.replaceAll("/", "__")}.html`), html);
   }
+}
+
+function buildExploreProjection(objects, options = {}) {
+  const groups = options.groups ?? EXPLORE_GROUPS;
+  const defaultGroup = options.defaultGroup ?? "细胞功能与代谢";
+  const defaultTopic = options.defaultTopic ?? "血糖";
+  const topicObjects = new Map();
+  for (const item of objects.filter((entry) => entry.surface === "primary")) {
+    for (const topic of item.topicTags) topicObjects.set(topic, [...(topicObjects.get(topic) ?? []), item.id]);
+  }
+
+  const mappedTopics = groups.flatMap((group) => group.topics);
+  if (new Set(mappedTopics).size !== mappedTopics.length) throw new Error("探索标签不可重复归入多个分组");
+  const missing = [...topicObjects.keys()].filter((topic) => !mappedTopics.includes(topic));
+  const empty = mappedTopics.filter((topic) => !topicObjects.has(topic));
+  if (missing.length) throw new Error(`探索标签尚未分组：${missing.join("、")}`);
+  if (empty.length) throw new Error(`探索分组包含空标签：${empty.join("、")}`);
+  const defaultGroupEntry = groups.find((group) => group.name === defaultGroup);
+  if (!defaultGroupEntry) throw new Error(`探索默认分组无效：${defaultGroup}`);
+  if (!defaultGroupEntry.topics.includes(defaultTopic)) throw new Error(`探索默认标签无效：${defaultTopic}`);
+
+  return {
+    defaultGroup,
+    defaultTopic,
+    groups: groups.map((group) => ({
+      name: group.name,
+      topics: group.topics.map((name) => {
+        const objectIds = topicObjects.get(name) ?? [];
+        return { name, count: objectIds.length, objectIds };
+      }),
+    })),
+  };
+}
+
+function normalizedSearchTerm(value) {
+  return value.normalize("NFKC").toLocaleLowerCase("zh-CN").replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function validateAndSummarizeSearchMetadata(objects) {
+  const primary = objects.filter((item) => item.surface === "primary");
+  const claims = new Map();
+  for (const item of primary) {
+    const local = new Map();
+    for (const [kind, values] of [["alias", item.aliases], ["searchTerm", item.searchTerms], ["relatedQuery", item.relatedQueries]]) {
+      for (const value of values) {
+        const normalized = normalizedSearchTerm(value);
+        if (!normalized) throw new Error(`搜索词不可为空：${item.id}`);
+        if (local.has(normalized)) throw new Error(`搜索词重复：${item.id} 的“${value}”与“${local.get(normalized)}”归一化后相同`);
+        local.set(normalized, value);
+        claims.set(normalized, [...(claims.get(normalized) ?? []), { id: item.id, kind, value }]);
+      }
+    }
+  }
+  return {
+    termCounts: {
+      aliases: primary.reduce((total, item) => total + item.aliases.length, 0),
+      searchTerms: primary.reduce((total, item) => total + item.searchTerms.length, 0),
+      relatedQueries: primary.reduce((total, item) => total + item.relatedQueries.length, 0),
+    },
+    termCollisions: [...claims.entries()]
+      .filter(([, entries]) => new Set(entries.map((entry) => entry.id)).size > 1)
+      .map(([term, entries]) => ({ term, entries })),
+  };
 }
 
 function expectedCounts(objects) {
@@ -679,6 +840,7 @@ export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRo
         metadata.description,
         metadata.aliases.join(" "),
         metadata.searchTerms.join(" "),
+        metadata.relatedQueries.join(" "),
         metadata.tags.join(" "),
         metadata.topicTags.join(" "),
         slotText,
@@ -695,6 +857,7 @@ export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRo
         description: metadata.description,
         aliases: metadata.aliases,
         searchTerms: metadata.searchTerms,
+        relatedQueries: metadata.relatedQueries,
         tags: metadata.tags,
         topicTags: metadata.topicTags,
         category: categoryFor(metadata, collection),
@@ -735,7 +898,9 @@ export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRo
   }
   const counts = expectedCounts(objects);
   validateCounts(counts);
-  const payload = { schema: COMPILER_SCHEMA, searchEngine: SEARCH_ENGINE_VERSION, searchDocumentSchema: SEARCH_DOCUMENT_SCHEMA, objects, assetFingerprint: assetManifest.checksum };
+  const explore = buildExploreProjection(objects);
+  const searchMetadata = validateAndSummarizeSearchMetadata(objects);
+  const payload = { schema: COMPILER_SCHEMA, searchEngine: SEARCH_ENGINE_VERSION, searchDocumentSchema: SEARCH_DOCUMENT_SCHEMA, searchQueryExpansions: SEARCH_QUERY_EXPANSIONS, searchMetadata, objects, explore, assetFingerprint: assetManifest.checksum };
   const checksum = sha256(JSON.stringify(payload));
   const compactDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
     .format(new Date(generatedAt))
@@ -748,9 +913,9 @@ export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRo
     counts,
     assets: { strategy: "on-demand", source: "private-minio", count: assetManifest.count, checksum: assetManifest.checksum },
     schema: COMPILER_SCHEMA,
-    search: { engine: "pagefind", engineVersion: SEARCH_ENGINE_VERSION, documentSchema: SEARCH_DOCUMENT_SCHEMA, baseUrl: `/api/v1/search/${version}/`, files: [] },
+    search: { engine: "pagefind", engineVersion: SEARCH_ENGINE_VERSION, documentSchema: SEARCH_DOCUMENT_SCHEMA, queryExpansions: SEARCH_QUERY_EXPANSIONS, ...searchMetadata, baseUrl: `/api/v1/search/${version}/`, files: [] },
   };
-  const release = { manifest, objects };
+  const release = { manifest, objects, explore };
 
   await fs.mkdir(outputRoot, { recursive: true });
   await writeSearchCorpus(objects, outputRoot);
@@ -767,4 +932,4 @@ export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRo
   return release;
 }
 
-export { buildAssetManifest, parseFrontmatter, sectionsAtLevel };
+export { buildAssetManifest, buildExploreProjection, parseFrontmatter, sectionsAtLevel };

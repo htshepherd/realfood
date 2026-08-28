@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
+const execFileAsync = promisify(execFile);
 
 test("生产 Compose 默认使用固定镜像，并允许通过环境变量切换镜像源", async () => {
   const compose = await readFile(path.join(projectRoot, "compose.yaml"), "utf8");
@@ -65,4 +68,15 @@ test("生产 runner 包含账号管理脚本依赖的服务端模块", async () 
     dockerfile,
     /COPY --from=builder --chown=nextjs:nodejs \/workspace\/prototype-mobile\/src\/server \.\/src\/server/,
   );
+});
+
+test("生产构建与搜索测试依赖的辅助文件都纳入版本控制", async () => {
+  const expected = [
+    "prototype-mobile/runtime-empty/.gitkeep",
+    "prototype-mobile/scripts/prepare-runtime-bundle.mjs",
+    "prototype-mobile/tests/search-candidate-queries.json",
+    "prototype-mobile/tests/search-golden-queries.json",
+  ];
+  const { stdout } = await execFileAsync("git", ["ls-files", "--", ...expected], { cwd: projectRoot });
+  assert.deepEqual(stdout.trim().split("\n").sort(), expected);
 });
