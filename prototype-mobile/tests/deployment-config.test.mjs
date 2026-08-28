@@ -23,6 +23,11 @@ test("生产 Compose 默认使用固定镜像，并允许通过环境变量切�
 
 test("应用镜像的三个构建阶段共享可覆盖的 Node 基础镜像", async () => {
   const dockerfile = await readFile(path.join(projectRoot, "prototype-mobile", "Dockerfile"), "utf8");
+  assert.doesNotMatch(
+    dockerfile,
+    /^# syntax=docker\/dockerfile:/m,
+    "显式 Dockerfile frontend 会绕过 NODE_IMAGE 镜像配置并访问 Docker Hub",
+  );
   assert.match(dockerfile, /^ARG NODE_IMAGE=node:24-alpine$/m);
   assert.equal(dockerfile.match(/^FROM \$\{NODE_IMAGE\} AS /gm)?.length, 3);
 });
