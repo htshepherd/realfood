@@ -6,8 +6,8 @@
 2. 把私有运行时包保存在 Git 工作区之外，或放入已忽略的 `private-deploy/`，在 `.env` 设置其目录 `RUNTIME_BUNDLE_CONTEXT`、文件名 `RUNTIME_BUNDLE_FILENAME` 和校验值 `RUNTIME_BUNDLE_SHA256`。BuildKit 以独立只读命名上下文挂载该目录，不会把压缩包加入 Git 或普通源码构建上下文。
 3. 运行 `docker compose up -d --build`。如果工作区已经包含经校验的活动运行时文件，构建会直接使用；干净检出则从只读命名上下文校验并解压。Caddy 会为公网域名自动申请和续期 HTTPS 证书。
 4. 首次配置固定家庭账号：临时设置 `SEED_ACCOUNTS_JSON`，运行 `docker compose run --rm app node scripts/seed-accounts.mjs`，完成后立即删除该变量。
-5. Compose 的 `assets` 一次性服务会在应用启动前上传原图与无损 WebP；需要单独重传时运行 `docker compose run --rm assets`。MinIO 桶始终保持私有。
-6. 每次知识更新先执行 `pnpm knowledge:build` 检查候选版本；确认报告后执行 `pnpm knowledge:publish`，再构建并部署同一版本镜像。Compose 会在应用启动前把原图与同像素无损 WebP 上传到私有 MinIO。
+5. Compose 的 `assets` 一次性服务会在应用启动前，按活动知识版本清单校验并上传版本化 PNG/WebP；需要单独重传时运行 `docker compose run --rm assets`。MinIO 桶始终保持私有，同一版本键不能以不同字节覆盖。
+6. 每次知识更新先执行 `pnpm knowledge:build` 检查候选版本；确认报告后执行 `pnpm knowledge:publish`，再构建并部署同一版本镜像。候选构建不会修改活动资源。首次升级到 `ihealth-release@3` 时也必须完成这次人工发布，旧版私有运行时包会在构建前安全失败，安装、构建和测试都不会自动发布。
 7. `public/` 只放 PWA 图标和 Service Worker；知识 JSON、Pagefind 与业务图片位于服务端目录或私有 MinIO，必须通过登录后的 `/api/v1` 读取。
 
 中国大陆服务器无法稳定访问官方镜像源时，只在服务器 `.env` 中设置 `NODE_IMAGE`、`POSTGRES_IMAGE`、`MINIO_IMAGE`、`MINIO_MC_IMAGE` 和 `CADDY_IMAGE`。不要直接替换 `compose.yaml` 或 Dockerfile 中的镜像地址，否则后续更新会产生工作区冲突。示例值见 `.env.example`。
@@ -18,6 +18,6 @@ PostgreSQL、MinIO 和 Caddy 卷使用显式稳定名称，不再跟随 Compose 
 
 部署到隔离测试栈后，配置 `STACK_BASE_URL`、`STACK_ACCOUNT_A_JSON`、`STACK_ACCOUNT_B_JSON` 和 `DATABASE_URL`，运行 `pnpm test:stack`。它会验证真实登录、两个账号的收藏隔离与幂等、账号停用、私有 MinIO 图片读取和公开路径阻断；测试结束会重新启用测试账号 A。
 
-生产备份必须写到 ECS 以外的 S3 兼容存储。配置 Restic 变量后，由系统定时器每天运行 `docker compose --profile ops run --rm backup`；脚本会导出 PostgreSQL、镜像 MinIO 私有桶、加密上传，并保留 7 个日备份、4 个周备份和 6 个每月备份。
+生产备份必须写到 ECS 以外的 S3 兼容存储。首次创建仓库只能显式运行 `docker compose --profile ops run --rm --entrypoint /usr/local/bin/bootstrap-restic.sh backup`；普通备份绝不自动初始化仓库。配置 Restic 变量后，由系统定时器每天运行 `docker compose --profile ops run --rm backup`；脚本会先验证既有仓库，再导出 PostgreSQL、镜像 MinIO 私有桶、加密上传，并保留 7 个日备份、4 个周备份和 6 个每月备份。
 
-恢复演练使用同一镜像，但显式改为 `/usr/local/bin/restore.sh`，同时传入 `RESTORE_SNAPSHOT` 和 `RESTORE_CONFIRM=I_UNDERSTAND`。恢复会覆盖目标数据库和 MinIO 桶，只应在隔离环境或明确停机窗口执行。至少每季度演练一次。本仓库不保存任何生产密码、账号明文或备份凭据。
+恢复演练使用同一镜像，但显式改为 `/usr/local/bin/restore.sh`，同时传入 `RESTORE_SNAPSHOT` 和 `RESTORE_CONFIRM=I_UNDERSTAND`。恢复只接受快照根目录的 `postgres.dump` 和独立 `minio/` 子树，并在覆盖前验证 PostgreSQL 归档结构与文件类型。恢复会覆盖目标数据库和 MinIO 桶，只应在隔离环境或明确停机窗口执行。至少每季度演练一次。本仓库不保存任何生产密码、账号明文或备份凭据。

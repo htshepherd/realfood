@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyVerifiedAssets } from "./asset-publication.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, "..");
@@ -18,6 +19,7 @@ const release = JSON.parse(await fs.readFile(releaseSource, "utf8"));
 const activeDataRoot = path.join(appRoot, "src", "data");
 const privatePagefindRoot = path.join(appRoot, "server-assets", "pagefind", release.manifest.version);
 const releaseHistoryRoot = path.join(appRoot, "server-assets", "releases");
+const versionedAssetRoot = path.join(appRoot, "server-assets", "assets", release.manifest.version);
 
 await Promise.all([fs.mkdir(activeDataRoot, { recursive: true }), fs.mkdir(releaseHistoryRoot, { recursive: true })]);
 try {
@@ -28,6 +30,8 @@ try {
 } catch (error) {
   if (error?.code !== "ENOENT") throw error;
 }
+
+await copyVerifiedAssets(path.join(candidateRoot, "assets"), versionedAssetRoot, release.manifest.assets.items);
 
 const stagingPagefind = `${privatePagefindRoot}.next`;
 await fs.rm(stagingPagefind, { recursive: true, force: true });

@@ -1,8 +1,14 @@
-FROM postgres:16-alpine
+ARG POSTGRES_IMAGE=postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+FROM ${POSTGRES_IMAGE}
 ARG TARGETARCH
-RUN apk add --no-cache restic curl && \
-    curl -fsSL "https://dl.min.io/client/mc/release/linux-${TARGETARCH}/mc" -o /usr/local/bin/mc && \
+ARG MC_VERSION=RELEASE.2025-07-21T05-28-08Z
+ARG MC_SHA256_AMD64=ea4a453be116071ab1ccbd24eb8755bf0579649f41a7b94ab9e68571bb9f4a1e
+ARG MC_SHA256_ARM64=62a7d4cc0ea37e7a5b564e0991057d4fec2a563566511fabe4ee5c1568f5e00b
+RUN apk add --no-cache restic=0.18.1-r0 curl && \
+    case "${TARGETARCH}" in amd64) mc_sha256="${MC_SHA256_AMD64}" ;; arm64) mc_sha256="${MC_SHA256_ARM64}" ;; *) echo "不支持的架构：${TARGETARCH}" >&2; exit 1 ;; esac && \
+    curl -fsSL "https://dl.min.io/client/mc/release/linux-${TARGETARCH}/archive/mc.${MC_VERSION}" -o /usr/local/bin/mc && \
+    echo "${mc_sha256}  /usr/local/bin/mc" | sha256sum -c - && \
     chmod +x /usr/local/bin/mc
-COPY backup.sh restore.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/backup.sh /usr/local/bin/restore.sh
+COPY backup.sh restore.sh bootstrap-restic.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/backup.sh /usr/local/bin/restore.sh /usr/local/bin/bootstrap-restic.sh
 ENTRYPOINT ["/usr/local/bin/backup.sh"]

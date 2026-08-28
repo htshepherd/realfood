@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 
 import { query } from "./db";
-import { e2eMode } from "./e2e-mode";
+import { e2eMode, e2eSession } from "./e2e-mode";
 import { hashSessionToken, verifySignedSession } from "./session-credential.mjs";
 
 export const SESSION_COOKIE = "ihealth_session";
@@ -21,7 +21,10 @@ export async function currentSession(): Promise<AccountSession | null> {
   const credential = (await cookies()).get(SESSION_COOKIE)?.value;
   const token = verifySignedSession(credential, signingSecret());
   if (!token) return null;
-  if (e2eMode()) return { accountId: "00000000-0000-0000-0000-000000000001", username: "admin", displayName: "管理员", deviceId: "e2e-device" };
+  if (e2eMode()) {
+    const session = e2eSession(hashSessionToken(token));
+    return session ? { ...session, deviceId: "e2e-device" } : null;
+  }
   const result = await query<AccountSession & { enabled: boolean }>(`
     SELECT a.id AS "accountId", a.username, a.display_name AS "displayName",
            d.id AS "deviceId", a.enabled

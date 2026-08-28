@@ -10,9 +10,14 @@ set -eu
 
 backup_dir="$(mktemp -d /tmp/ihealth-backup.XXXXXX)"
 trap 'rm -rf "$backup_dir"' EXIT
-pg_dump "$DATABASE_URL" --format=custom --file="$backup_dir/postgres.dump"
+payload_dir="$backup_dir/payload"
+mkdir -p "$payload_dir/minio"
+
+# A normal backup must prove that the configured repository already exists.
+# Any credential, network, or repository error is intentionally propagated.
+restic cat config >/dev/null
+pg_dump "$DATABASE_URL" --format=custom --file="$payload_dir/postgres.dump"
 mc alias set ihealth http://minio:9000 "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
-mc mirror --quiet "ihealth/$MINIO_BUCKET" "$backup_dir/minio"
-restic snapshots >/dev/null 2>&1 || restic init
-restic backup "$backup_dir" --tag ihealth
+mc mirror --quiet "ihealth/$MINIO_BUCKET" "$payload_dir/minio"
+(cd "$payload_dir" && restic backup postgres.dump minio --tag ihealth)
 restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
+import { readRegularFile, regularFiles, validatePathSegment } from "../src/server/safe-files.mjs";
 
 const COLLECTIONS = [
   ["foods", "食物"],
@@ -76,7 +77,7 @@ const DEFICIENCY_SYMPTOM_GROUP_TITLES = new Set([
 // Authoring-only sections are intentionally omitted. Listing them explicitly
 // ensures a newly introduced heading fails the build instead of disappearing.
 const AUTHORING_ONLY_HEADINGS = new Set(["重点提示", "资料状态"]);
-const COMPILER_SCHEMA = "ihealth-release@2";
+const COMPILER_SCHEMA = "ihealth-release@3";
 const SEARCH_ENGINE_VERSION = "pagefind@1.5.2";
 const SEARCH_DOCUMENT_SCHEMA = "focused-effects-deficiency-safety@2";
 const SEARCH_CONTENT_SLOT_KEYS = ["effects", "deficiency", "safety"];
@@ -134,16 +135,6 @@ const normalizeName = (value) => value
   .replace(/^所有/, "")
   .replaceAll(" ", "")
   .replace("大枣", "鲜枣");
-
-async function walk(directory) {
-  const files = [];
-  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
-    const fullPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) files.push(...await walk(fullPath));
-    else files.push(fullPath);
-  }
-  return files;
-}
 
 function parseInlineArray(value) {
   if (!value || value === "[]") return [];
@@ -556,6 +547,10 @@ function categoryFor(metadata, collection) {
 async function buildRawOrder(rawRoot) {
   const result = new Map();
   for (const entry of await fs.readdir(rawRoot, { withFileTypes: true })) {
+    validatePathSegment(entry.name);
+    const entryPath = path.join(rawRoot, entry.name);
+    const stat = await fs.lstat(entryPath);
+    if (stat.isSymbolicLink()) throw new Error(`拒绝原始资料符号链接：${entryPath}`);
     if (!entry.isDirectory()) continue;
     const match = entry.name.match(/^(\d+)_([^/]+)$/);
     if (match) result.set(normalizeName(match[2]), Number(match[1]));
@@ -566,48 +561,47 @@ async function buildRawOrder(rawRoot) {
 }
 
 async function markdownFiles(directory) {
-  return (await walk(directory)).filter((file) => file.endsWith(".md") && path.basename(file) !== "index.md");
+  return (await regularFiles(directory)).filter((file) => file.endsWith(".md") && path.basename(file) !== "index.md");
 }
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-async function buildAssetManifest(assetRoot, generateOptimized) {
+async function buildAssetManifest(assetRoot, options = {}) {
   if (!assetRoot) return { checksum: sha256("[]"), count: 0, items: [] };
+  const outputRoot = typeof options === "object" ? options.outputRoot : null;
   const items = [];
   for (const bucket of ["food-images", "knowledge-images", "verification-images"]) {
     const directory = path.join(assetRoot, bucket);
-    for (const filePath of (await walk(directory)).filter((file) => file.endsWith(".png"))) {
-      const bytes = await fs.readFile(filePath);
-      const metadata = await sharp(bytes).metadata();
+    for (const filePath of await regularFiles(directory, { skipTopLevel: ["optimized"] })) {
+      if (path.extname(filePath).toLowerCase() !== ".png") throw new Error(`只允许 PNG 原始资源：${filePath}`);
       const filename = path.basename(filePath);
+      validatePathSegment(filename);
+      const bytes = await readRegularFile(directory, filePath);
+      const metadata = await sharp(bytes).metadata();
+      if (metadata.format !== "png" || !metadata.width || !metadata.height) throw new Error(`不是有效 PNG：${bucket}/${filename}`);
       const optimizedKey = `${bucket}/optimized/${path.basename(filename, ".png")}.webp`;
-      const optimizedPath = path.join(assetRoot, optimizedKey);
-      let optimizedBytes;
-      try {
-        const [sourceStat, optimizedStat] = await Promise.all([fs.stat(filePath), fs.stat(optimizedPath)]);
-        if (optimizedStat.mtimeMs < sourceStat.mtimeMs) throw new Error("stale");
-        optimizedBytes = await fs.readFile(optimizedPath);
-      } catch {
-        optimizedBytes = await sharp(bytes).webp({ lossless: true, effort: 4 }).toBuffer();
-      }
+      const optimizedBytes = await sharp(bytes).rotate().webp({ lossless: true, effort: 4 }).toBuffer();
       const optimizedMetadata = await sharp(optimizedBytes).metadata();
       if (metadata.width !== optimizedMetadata.width || metadata.height !== optimizedMetadata.height) {
         throw new Error(`优化图片尺寸发生变化：${bucket}/${filename}`);
       }
-      if (generateOptimized) {
-        await fs.mkdir(path.dirname(optimizedPath), { recursive: true });
-        await fs.writeFile(optimizedPath, optimizedBytes);
+      if (outputRoot) {
+        const originalOutput = path.join(outputRoot, bucket, filename);
+        const optimizedOutput = path.join(outputRoot, optimizedKey);
+        await Promise.all([fs.mkdir(path.dirname(originalOutput), { recursive: true }), fs.mkdir(path.dirname(optimizedOutput), { recursive: true })]);
+        await Promise.all([fs.writeFile(originalOutput, bytes), fs.writeFile(optimizedOutput, optimizedBytes)]);
       }
       items.push({
         key: `${bucket}/${filename}`,
         bytes: bytes.length,
         checksum: sha256(bytes),
+        mediaType: "image/png",
         width: metadata.width,
         height: metadata.height,
         original: { format: "png", retained: true },
-        optimized: { key: optimizedKey, format: "webp", lossless: true, width: metadata.width, height: metadata.height, bytes: optimizedBytes.length, checksum: sha256(optimizedBytes) },
+        optimized: { key: optimizedKey, format: "webp", mediaType: "image/webp", lossless: true, width: metadata.width, height: metadata.height, bytes: optimizedBytes.length, checksum: sha256(optimizedBytes) },
       });
     }
   }
@@ -814,7 +808,7 @@ function validateCounts(counts) {
 
 export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRoot, assetRoot = null, copyAssets = true, generatedAt = new Date().toISOString() }) {
   const rawOrder = await buildRawOrder(rawRoot);
-  const assetManifest = await buildAssetManifest(assetRoot, copyAssets);
+  const assetManifest = await buildAssetManifest(assetRoot, { outputRoot: copyAssets && assetRoot ? path.join(outputRoot, "assets") : null });
   const objects = [];
 
   for (const [relativeDirectory, collection] of COLLECTIONS) {
@@ -824,7 +818,7 @@ export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRo
       if (relativeDirectory === "references" && relativeFile.startsWith("references/taxonomies/")) continue;
       const slug = path.basename(filePath, ".md");
       const id = `${relativeDirectory}/${slug}`;
-      const markdown = await fs.readFile(filePath, "utf8");
+      const markdown = (await readRegularFile(directory, filePath)).toString("utf8");
       const { body, metadata } = parseFrontmatter(markdown, relativeFile);
       if (!metadata.type || !metadata.title || !metadata.scope) throw new Error(`缺少必填元数据：${relativeFile}`);
       const surface = surfaceForType(metadata.type);
@@ -911,7 +905,7 @@ export async function compileKnowledgeRelease({ knowledgeRoot, rawRoot, outputRo
     generatedAt,
     checksum,
     counts,
-    assets: { strategy: "on-demand", source: "private-minio", count: assetManifest.count, checksum: assetManifest.checksum },
+    assets: { strategy: "on-demand", source: "private-minio", count: assetManifest.count, checksum: assetManifest.checksum, items: assetManifest.items },
     schema: COMPILER_SCHEMA,
     search: { engine: "pagefind", engineVersion: SEARCH_ENGINE_VERSION, documentSchema: SEARCH_DOCUMENT_SCHEMA, queryExpansions: SEARCH_QUERY_EXPANSIONS, ...searchMetadata, baseUrl: `/api/v1/search/${version}/`, files: [] },
   };

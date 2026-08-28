@@ -2,10 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 
 import goldenQueries from "../tests/search-golden-queries.json";
 
-async function login(page: Page) {
+async function login(page: Page, username = "admin", password = "999999") {
   await page.goto("/");
-  await page.getByPlaceholder("账号").fill("admin");
-  await page.getByPlaceholder("密码").fill("999999");
+  await page.getByPlaceholder("账号").fill(username);
+  await page.getByPlaceholder("密码").fill(password);
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByPlaceholder("搜索食物、营养或健康问题")).toBeVisible({ timeout: 15_000 });
 }
@@ -384,4 +384,82 @@ test("退出会清除本机私有数据", async ({ page }) => {
     const cachedRequests = (await Promise.all(cacheNames.map(async (name) => (await caches.open(name)).keys()))).flat().map((request) => new URL(request.url).pathname);
     return { privateEntries: cachedRequests.filter((path) => path.startsWith("/api/v1/")).length, databases: (await indexedDB.databases()).filter((database) => database.name === "ihealth-private-v1").length };
   })).toEqual({ privateEntries: 0, databases: 0 });
+});
+
+test("任一标签页退出会立即清除所有标签页的私有界面和存储", async ({ page, context }) => {
+  await login(page);
+  const sibling = await context.newPage();
+  await sibling.goto("/");
+  await expect(sibling.getByPlaceholder("搜索食物、营养或健康问题")).toBeVisible();
+  await navigate(sibling, "营养素");
+  await sibling.locator("article").first().getByRole("button").click();
+  await expect(sibling.getByRole("button", { name: "返回" })).toBeVisible();
+
+  await page.getByRole("button", { name: "打开菜单" }).click();
+  await page.getByRole("button", { name: "退出并清除本机数据" }).click();
+
+  await expect(page.getByPlaceholder("密码")).toBeVisible();
+  await expect(sibling.getByPlaceholder("密码")).toBeVisible();
+  await expect(sibling.getByRole("button", { name: "返回" })).toHaveCount(0);
+  for (const current of [page, sibling]) {
+    await expect.poll(() => current.evaluate(async () => ({
+      databases: (await indexedDB.databases()).filter((database) => database.name === "ihealth-private-v1").length,
+      privateCaches: (await caches.keys()).filter((name) => name.includes("ihealth") || name.includes("pagefind")).length,
+    }))).toEqual({ databases: 0, privateCaches: 0 });
+  }
+});
+
+test("账户 A 的陈旧离线队列不会重放到账户 B", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "打开菜单" }).click();
+  await page.getByRole("button", { name: "退出并清除本机数据" }).click();
+  await login(page, "family", "888888");
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("ihealth-private-v1", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction("private-data", "readwrite");
+      transaction.objectStore("private-data").put([{
+        accountId: "00000000-0000-0000-0000-000000000001",
+        objectId: "nutrients/vitamin-c",
+        favorite: true,
+        updatedAt: new Date().toISOString(),
+      }], "account:00000000-0000-0000-0000-000000000002:favorite-queue");
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  });
+  await page.reload();
+  await expect(page.getByPlaceholder("搜索食物、营养或健康问题")).toBeVisible();
+  const favorites = await (await page.request.get("/api/v1/favorites")).json();
+  expect(favorites.items.some((item: { objectId: string; deleted: boolean }) => item.objectId === "nutrients/vitamin-c" && !item.deleted)).toBe(false);
+});
+
+test("退出代际会丢弃仍在途的收藏写入", async ({ page }) => {
+  await login(page);
+  await page.evaluate(() => {
+    const target = window as typeof window & { favoriteWriteStarted?: boolean; releaseFavoriteWrite?: () => void };
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      if (String(input).includes("/api/v1/favorites") && init?.method === "PUT") {
+        target.favoriteWriteStarted = true;
+        return new Promise((resolve, reject) => { target.releaseFavoriteWrite = () => { void originalFetch(input, init).then(resolve, reject); }; });
+      }
+      return originalFetch(input, init);
+    };
+  });
+  await navigate(page, "营养素");
+  await page.locator("article").first().getByRole("button").click();
+  await page.locator("header").getByRole("button", { name: /收藏/ }).click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { favoriteWriteStarted?: boolean }).favoriteWriteStarted)).toBe(true);
+  await page.getByRole("button", { name: "返回" }).click();
+  await page.getByRole("button", { name: "打开菜单" }).click();
+  await page.getByRole("button", { name: "退出并清除本机数据" }).click();
+  await page.evaluate(() => (window as typeof window & { releaseFavoriteWrite?: () => void }).releaseFavoriteWrite?.());
+  await expect(page.getByPlaceholder("密码")).toBeVisible();
+  await expect.poll(() => page.evaluate(async () => (await indexedDB.databases()).filter((database) => database.name === "ihealth-private-v1").length)).toBe(0);
 });

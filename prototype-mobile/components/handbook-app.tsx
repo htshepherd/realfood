@@ -53,7 +53,7 @@ type SearchQueryExpansion = { query: string; evidenceTerm?: string; context?: st
 type SearchTermCollision = { term: string; entries: { id: string; kind: string; value: string }[] };
 type Release = { manifest: { schema: string; version: string; generatedAt: string; checksum: string; counts: { primary: number }; assets: { checksum: string }; search: { engine: string; engineVersion: string; documentSchema?: string; baseUrl: string; files?: SearchFile[]; queryExpansions?: Record<string, SearchQueryExpansion[]>; termCounts?: { aliases: number; searchTerms: number; relatedQueries: number }; termCollisions?: SearchTermCollision[] } }; objects: KnowledgeItem[]; explore?: ExploreProjection };
 type Account = { id: string; username: string; displayName: string };
-type FavoriteOperation = { objectId: string; favorite: boolean; updatedAt: string };
+type FavoriteOperation = { accountId: string; objectId: string; favorite: boolean; updatedAt: string };
 type View = "home" | "foods" | "nutrients" | "supplements" | "explore" | "verification" | "favorites";
 
 const VIEW_LABELS: Record<View, string> = {
@@ -283,6 +283,10 @@ function Login({ onSuccess }: { onSuccess: (account: Account) => void }) {
     event.preventDefault(); setError(""); setPending(true);
     const values = new FormData(event.currentTarget);
     try {
+      if (localStorage.getItem("ihealth-logout-pending") === "1") {
+        await api("/api/v1/auth/logout", { method: "POST" });
+        localStorage.removeItem("ihealth-logout-pending");
+      }
       const result = await api<{ account: Account }>("/api/v1/auth/login", {
         method: "POST",
         body: JSON.stringify({ username: values.get("username"), password: values.get("password"), deviceName: navigator.userAgent }),
@@ -697,35 +701,63 @@ function Verification({ onMenu, marks }: { onMenu: () => void; marks: { name: st
 
 export function HandbookApp() {
   const initialLoadStarted = useRef(false);
+  const privacyGeneration = useRef(0);
   const [account, setAccount] = useState<Account | null>(null); const [release, setRelease] = useState<Release | null>(null);
   const [loading, setLoading] = useState(true); const [view, setView] = useState<View>("home"); const [drawer, setDrawer] = useState(false);
   const [selected, setSelected] = useState<KnowledgeItem | null>(null); const [search, setSearch] = useState(""); const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
 
+  const accountKey = (accountId: string, key: string) => `account:${accountId}:${key}`;
+  function clearRenderedPrivateState() {
+    privacyGeneration.current += 1;
+    setAccount(null); setRelease(null); setFavoriteIds(new Set()); setSelected(null);
+    setView("home"); setDrawer(false); setSearch(""); setLoading(false);
+  }
+  async function acceptLogoutEvent() {
+    clearRenderedPrivateState();
+    await clearOfflineData();
+  }
+  function announceLogout() {
+    const event = `${Date.now()}:${crypto.randomUUID?.() ?? Math.random()}`;
+    localStorage.setItem("ihealth-logout-generation", event);
+    if (typeof BroadcastChannel !== "undefined") {
+      const channel = new BroadcastChannel("ihealth-private-session");
+      channel.postMessage({ type: "logout", event });
+      channel.close();
+    }
+  }
+
   async function loadPrivateData(knownAccount?: Account | null) {
-    if (localStorage.getItem("ihealth-logout-pending") === "1") {
+    const generation = privacyGeneration.current;
+    if (!knownAccount && localStorage.getItem("ihealth-logout-pending") === "1") {
       try { await api("/api/v1/auth/logout", { method: "POST" }); localStorage.removeItem("ihealth-logout-pending"); }
       catch { setLoading(false); return; }
     }
     const cachedAccount = knownAccount ?? await readOffline<Account>("account");
-    const cachedRelease = await readOffline<Release>("release"); const cachedFavorites = await readOffline<string[]>("favorites");
-    if (cachedAccount && cachedRelease) {
+    const cachedRelease = cachedAccount ? await readOffline<Release>(accountKey(cachedAccount.id, "release")) : null;
+    const cachedFavorites = cachedAccount ? await readOffline<string[]>(accountKey(cachedAccount.id, "favorites")) : null;
+    if (generation === privacyGeneration.current && cachedAccount && cachedRelease) {
       setAccount(cachedAccount); setRelease(cachedRelease); setFavoriteIds(new Set(cachedFavorites ?? [])); setLoading(false);
     }
+    if (generation !== privacyGeneration.current) return;
     try {
       const me = await api<{ account: Account }>("/api/v1/auth/me");
       const freshRelease = await api<Release>("/api/v1/releases/current");
       if (!(await validRelease(freshRelease))) throw new Error("知识版本校验失败");
       await prefetchSearch(freshRelease);
-      const pending = await readOffline<FavoriteOperation[]>("favorite-queue") ?? [];
+      const queueKey = accountKey(me.account.id, "favorite-queue");
+      const pending = await readOffline<FavoriteOperation[]>(queueKey) ?? [];
       const remaining: FavoriteOperation[] = [];
       for (const operation of pending) {
+        if (operation.accountId !== me.account.id || generation !== privacyGeneration.current) continue;
         try { await api("/api/v1/favorites", { method: "PUT", body: JSON.stringify(operation) }); }
         catch { remaining.push(operation); }
       }
-      await writeOffline("favorite-queue", remaining);
+      if (generation !== privacyGeneration.current) return;
+      await writeOffline(queueKey, remaining);
       const serverFavorites = await api<{ items: { objectId: string; deleted: boolean }[] }>("/api/v1/favorites");
       const ids = serverFavorites.items.filter((item) => !item.deleted).map((item) => item.objectId);
-      await Promise.all([writeOffline("account", me.account), writeOffline("release", freshRelease), writeOffline("favorites", ids)]);
+      if (generation !== privacyGeneration.current) return;
+      await Promise.all([writeOffline("account", me.account), writeOffline(accountKey(me.account.id, "release"), freshRelease), writeOffline(accountKey(me.account.id, "favorites"), ids)]);
       setAccount(me.account); setRelease(freshRelease); setFavoriteIds(new Set(ids));
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) { await clearOfflineData(); setAccount(null); setRelease(null); setFavoriteIds(new Set()); }
@@ -738,18 +770,49 @@ export function HandbookApp() {
     initialLoadStarted.current = true;
     void loadPrivateData();
   }, []);
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => { if (event.key === "ihealth-logout-generation" && event.newValue) void acceptLogoutEvent(); };
+    const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("ihealth-private-session") : null;
+    if (channel) channel.onmessage = (event) => { if (event.data?.type === "logout") void acceptLogoutEvent(); };
+    window.addEventListener("storage", onStorage);
+    return () => { window.removeEventListener("storage", onStorage); channel?.close(); };
+  }, []);
+  useEffect(() => {
+    if (!account) return;
+    let checking = false;
+    const revalidate = async () => {
+      if (checking || !navigator.onLine || document.visibilityState === "hidden") return;
+      checking = true;
+      try { await api("/api/v1/auth/me"); }
+      catch (error) {
+        if (error instanceof ApiError && error.status === 401) { announceLogout(); await acceptLogoutEvent(); }
+      } finally { checking = false; }
+    };
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
+    return () => { window.removeEventListener("focus", revalidate); document.removeEventListener("visibilitychange", revalidate); };
+  }, [account?.id]);
   async function login(success: Account) { setLoading(true); await loadPrivateData(success); }
   async function logout() {
     try { await api("/api/v1/auth/logout", { method: "POST" }); localStorage.removeItem("ihealth-logout-pending"); }
     catch { localStorage.setItem("ihealth-logout-pending", "1"); }
-    await clearOfflineData(); setAccount(null); setRelease(null); setFavoriteIds(new Set()); setSelected(null);
+    announceLogout(); await acceptLogoutEvent();
   }
   async function toggleFavorite(item: KnowledgeItem) {
-    const next = new Set(favoriteIds); const favorite = !next.has(item.id); favorite ? next.add(item.id) : next.delete(item.id); setFavoriteIds(next); await writeOffline("favorites", [...next]);
-    const operation = { objectId: item.id, favorite, updatedAt: new Date().toISOString() };
-    const queue = (await readOffline<FavoriteOperation[]>("favorite-queue") ?? []).filter((entry) => entry.objectId !== item.id);
-    await writeOffline("favorite-queue", [...queue, operation]);
-    try { await api("/api/v1/favorites", { method: "PUT", body: JSON.stringify(operation) }); await writeOffline("favorite-queue", queue); } catch {}
+    if (!account) return;
+    const accountId = account.id; const generation = privacyGeneration.current; const queueKey = accountKey(accountId, "favorite-queue");
+    const next = new Set(favoriteIds); const favorite = !next.has(item.id); favorite ? next.add(item.id) : next.delete(item.id); setFavoriteIds(next);
+    if (generation !== privacyGeneration.current) return;
+    await writeOffline(accountKey(accountId, "favorites"), [...next]);
+    if (generation !== privacyGeneration.current) return;
+    const operation = { accountId, objectId: item.id, favorite, updatedAt: new Date().toISOString() };
+    const queue = (await readOffline<FavoriteOperation[]>(queueKey) ?? []).filter((entry) => entry.objectId !== item.id);
+    if (generation !== privacyGeneration.current) return;
+    await writeOffline(queueKey, [...queue, operation]);
+    try {
+      await api("/api/v1/favorites", { method: "PUT", body: JSON.stringify(operation) });
+      if (generation === privacyGeneration.current) await writeOffline(queueKey, queue);
+    } catch {}
   }
   if (loading && !release) return <div className="grid min-h-dvh place-items-center text-[14px] text-[var(--muted)]">正在打开家庭知识…</div>;
   if (!account || !release) return <Login onSuccess={login}/>;

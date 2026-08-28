@@ -21,11 +21,27 @@ try {
        RETURNING username
     `, [username, passwordHash]);
     if (!result.rowCount) throw new Error(`账号不存在：${username}`);
+  } else if (action === "disable") {
+    await client.query("BEGIN");
+    try {
+      const result = await client.query(`
+        UPDATE accounts
+           SET enabled = false, password_version = password_version + 1, updated_at = now()
+         WHERE lower(username) = lower($1)
+         RETURNING id, username
+      `, [username]);
+      if (!result.rowCount) throw new Error(`账号不存在：${username}`);
+      await client.query("DELETE FROM trusted_devices WHERE account_id = $1", [result.rows[0].id]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
   } else {
     const result = await client.query(`
-      UPDATE accounts SET enabled = $2, updated_at = now()
+      UPDATE accounts SET enabled = true, updated_at = now()
        WHERE lower(username) = lower($1) RETURNING username
-    `, [username, action === "enable"]);
+    `, [username]);
     if (!result.rowCount) throw new Error(`账号不存在：${username}`);
   }
   console.log(`账号 ${username} 已${action === "disable" ? "停用" : action === "enable" ? "启用" : "轮换密码并启用"}。`);

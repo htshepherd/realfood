@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { compileKnowledgeRelease } from "./knowledge-compiler.mjs";
+import { safeReportCode } from "../src/server/safe-files.mjs";
 
 const execFileAsync = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -78,7 +79,7 @@ try { previousAssets = JSON.parse(await fs.readFile(path.join(appRoot, ".generat
 const assetSummary = previousAssets?.checksum === release.manifest.assets.checksum
   ? "无变化"
   : `${previousAssets?.count ?? 0} → ${release.manifest.assets.count} 个资源；校验和已变化`;
-await fs.writeFile(path.join(candidateRoot, "report.md"), `# 候选知识版本 ${release.manifest.version}\n\n- 总对象：${release.manifest.counts.total}\n- 普通详情对象：${release.manifest.counts.primary}\n- 发布校验和：\`${release.manifest.checksum}\`\n- Pagefind 文件：${release.manifest.search.files.length}\n- 资源变化：${assetSummary}\n- 变更对象：${changedObjects.length}\n\n${changedObjects.length ? changedObjects.map((id) => `- \`${id}\``).join("\n") : "- 无"}\n`);
+await fs.writeFile(path.join(candidateRoot, "report.md"), `# 候选知识版本 ${release.manifest.version}\n\n- 总对象：${release.manifest.counts.total}\n- 普通详情对象：${release.manifest.counts.primary}\n- 发布校验和：\`${release.manifest.checksum}\`\n- Pagefind 文件：${release.manifest.search.files.length}\n- 资源变化：${assetSummary}\n- 变更对象：${changedObjects.length}\n\n${changedObjects.length ? changedObjects.map((id) => `- \`${safeReportCode(id)}\``).join("\n") : "- 无"}\n`);
 await Promise.all([
   fs.writeFile(path.join(candidateRoot, "release.json"), `${JSON.stringify(release, null, 2)}\n`),
   fs.writeFile(path.join(candidateRoot, "manifest.json"), `${JSON.stringify(release.manifest, null, 2)}\n`),

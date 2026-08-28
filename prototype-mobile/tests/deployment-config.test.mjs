@@ -70,6 +70,15 @@ test("生产 runner 包含账号管理脚本依赖的服务端模块", async () 
   );
 });
 
+test("公网代理隐藏内部就绪检查并限制 JSON 请求体", async () => {
+  const caddyfile = await readFile(path.join(projectRoot, "Caddyfile"), "utf8");
+  assert.match(caddyfile, /@internal_readiness path \/api\/internal\/\*/);
+  assert.match(caddyfile, /respond @internal_readiness 404/);
+  assert.match(caddyfile, /@bounded_json path \/api\/v1\/auth\/login \/api\/v1\/favorites/);
+  assert.match(caddyfile, /max_size 16KB/);
+  assert.match(caddyfile, /header_up X-Realfood-Client-IP \{remote_host\}/);
+});
+
 test("生产构建与搜索测试依赖的辅助文件都纳入版本控制", async () => {
   const expected = [
     "prototype-mobile/runtime-empty/.gitkeep",
